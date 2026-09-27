@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "profilometer-comparison"
+dynamic = ["version"]
+description = "Compare before/after surface profilometry exports: alignment, height and colour difference maps, and a keyboard-driven viewer."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Joris Nagtegaal"}]
+dependencies = ["numpy>=1.24", "Pillow>=10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+profilometer-comparison = "profilometer_comparison.__main__:main"
+
+[tool.setuptools]
+packages = ["profilometer_comparison"]
+
+[tool.setuptools.dynamic]
+version = {attr = "profilometer_comparison.__version__"}
+
+[tool.setuptools.package-data]
+profilometer_comparison = ["colourmaps/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
