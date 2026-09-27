@@ -1,20 +1,26 @@
 """Stage 1: process before/after pairs into a cache folder."""
 from __future__ import annotations
 
+import csv
+import json
 import math
 import warnings
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
+from . import __version__
 from .align import Alignment, downsample, estimate_shift, overlap_slices
 from .colour import delta_e76, srgb_to_lab
 from .colourmap import Colourmap, default_colourmap, load_csv, rgb_to_height
 from .crop import crop_to_frame, find_plot_frame
-from .difference import Plane, fit_plane, histogram, subtract_plane
+from .difference import Plane, fit_plane, histogram, percentages, subtract_plane
 from .images import read_rgb
-from .masks import Polygon, polygons_to_mask
+from .masks import Polygon, load_masks, polygons_to_mask, save_masks
+from .pairing import natural_key, pair_folders, sample_id
 
 TYPES = {"pseudo-colour": "pseudo-colour-image", "true-colour": "true-colour"}
 REGION_ORDER = ("all", "glaze", "encrustation")
@@ -219,3 +225,195 @@ def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | 
         after_small=np.ascontiguousarray(after.rgb[as_][:hs:step, :ws:step]),
         diff_small=downsample(d, step).astype(np.float16),
     )
+
+
+class SettingsMismatch(Exception):
+    """The cache was made with different settings or input folders."""
+
+
+def _now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def detect_type(folder: str | Path) -> str | None:
+    """The type whose filename suffix most files in the folder carry."""
+    stems = [p.stem for p in Path(folder).iterdir() if p.is_file()]
+    counts = {t: sum(s.endswith("-" + suffix) for s in stems) for t, suffix in TYPES.items()}
+    best = max(counts, key=counts.get)
+    return best if counts[best] else None
+
+
+def _pair_dir(cache: Path, sample: str) -> Path:
+    return Path(cache) / "pairs" / sample
+
+
+def write_pair(cache: Path, result: PairResult) -> None:
+    d = _pair_dir(cache, result.sample)
+    d.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(result.before_small).save(d / "before.png")
+    Image.fromarray(result.after_small).save(d / "after.png")
+    np.save(d / "diff.npy", result.diff_small)
+    np.savez_compressed(d / "hist.npz", **result.hists)
+    (d / "meta.json").write_text(json.dumps(result.meta, indent=2), encoding="utf-8")  # last: marks completion
+
+
+def read_meta(cache: Path, sample: str) -> dict:
+    return json.loads((_pair_dir(cache, sample) / "meta.json").read_text(encoding="utf-8"))
+
+
+def read_hists(cache: Path, sample: str) -> dict[str, np.ndarray]:
+    with np.load(_pair_dir(cache, sample) / "hist.npz") as z:
+        return {k: z[k] for k in z.files}
+
+
+def processed_samples(cache: Path) -> list[str]:
+    pairs = Path(cache) / "pairs"
+    if not pairs.exists():
+        return []
+    return sorted((p.name for p in pairs.iterdir() if (p / "meta.json").exists()), key=natural_key)
+
+
+def read_manifest(cache: Path) -> dict:
+    return json.loads((Path(cache) / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _check_or_write_manifest(cache: Path, settings: Settings, before_dir: Path, after_dir: Path) -> None:
+    path = cache / "manifest.json"
+    current = {"before_dir": str(Path(before_dir).resolve()), "after_dir": str(Path(after_dir).resolve()),
+               "settings": settings.to_dict()}
+    if path.exists():
+        old = read_manifest(cache)
+        diffs = [k for k in ("before_dir", "after_dir") if old[k] != current[k]]
+        diffs += [k for k in current["settings"] if old["settings"].get(k) != current["settings"][k]]
+        if diffs:
+            raise SettingsMismatch(
+                f"{cache} was made with different {', '.join(diffs)}. "
+                "Use a new output folder (--out) or the original settings.")
+        return
+    path.write_text(json.dumps({"tool": "profilometer-comparison", "version": __version__,
+                                "created": _now(), **current}, indent=2), encoding="utf-8")
+
+
+def summary_columns(settings: Settings) -> list[str]:
+    cols = ["sample", "file", "type", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
+            "overlap_pct", "align_confidence", "align_warning", "plane_offset_um", "plane_tilt_x", "plane_tilt_y",
+            "mean_dL", "excluded_pct", "saturated_pct", "mask_changed_at"]
+    for t in settings.thresholds_resolved:
+        cols.append(f"pct_diff_{t:g}")
+        if settings.signed:
+            cols += [f"pct_lower_{t:g}", f"pct_higher_{t:g}"]
+    return cols
+
+
+def write_summary(cache: Path) -> Path:
+    cache = Path(cache)
+    settings = Settings.from_dict(read_manifest(cache)["settings"])
+    cols = summary_columns(settings)
+    path = cache / "summary.csv"
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
+        writer.writeheader()
+        for sample in processed_samples(cache):
+            meta, hists = read_meta(cache, sample), read_hists(cache, sample)
+            for region in (r for r in REGION_ORDER if r in hists):
+                row = {**meta, "region": region, "region_area_pct": meta["region_area_pct"][region]}
+                for t in settings.thresholds_resolved:
+                    p = percentages(hists[region], t, settings.signed)
+                    row[f"pct_diff_{t:g}"] = round(p["diff"], 4)
+                    if settings.signed:
+                        row[f"pct_lower_{t:g}"] = round(p["lower"], 4)
+                        row[f"pct_higher_{t:g}"] = round(p["higher"], 4)
+                writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+    tmp.replace(path)
+    return path
+
+
+def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=None, log=print) -> Path:
+    before_dir, after_dir, cache = Path(before_dir), Path(after_dir), Path(out_dir)
+    cache.mkdir(parents=True, exist_ok=True)
+    _check_or_write_manifest(cache, settings, before_dir, after_dir)
+
+    masks = load_masks(cache / "masks.json")
+    if masks_file:
+        masks.update(load_masks(masks_file))
+        save_masks(cache / "masks.json", masks)
+
+    log_lines = [f"=== prepare {_now()} (profilometer-comparison {__version__})"]
+
+    def note(message: str) -> None:
+        log_lines.append(message)
+        log(message)
+
+    pairing = pair_folders(before_dir, after_dir)
+    suffix = TYPES[settings.type]
+    typed = [p for p in pairing.pairs if Path(p.name).stem.endswith("-" + suffix)]
+    pairs = typed or pairing.pairs
+    for p in pairing.pairs:
+        if typed and p not in typed:
+            note(f"ignored (not a {settings.type} image): {p.name}")
+
+    cmap = load_colourmap(settings)
+    for i, pair in enumerate(pairs, 1):
+        sample = sample_id(pair.name, suffix)
+        if (_pair_dir(cache, sample) / "meta.json").exists():
+            continue
+        try:
+            result = process_pair(pair.before, pair.after, settings, cmap, masks.get(sample, []), sample=sample)
+            write_pair(cache, result)
+        except Exception as exc:  # one bad file must not stop the run
+            note(f"[{i}/{len(pairs)}] {sample}: ERROR {type(exc).__name__}: {exc}")
+            continue
+        m = result.meta
+        warn = f"  WARNING: {m['align_warning']}" if m["align_warning"] else ""
+        note(f"[{i}/{len(pairs)}] {sample}: shift {m['shift_x_um']:+.1f}/{m['shift_y_um']:+.1f} µm{warn}")
+
+    for name in pairing.before_only:
+        note(f"only in before folder: {name}")
+    for name in pairing.after_only:
+        note(f"only in after folder: {name}")
+    write_summary(cache)
+    with open(cache / "prepare-log.txt", "a", encoding="utf-8") as fh:
+        fh.write("\n".join(log_lines) + "\n")
+    return cache
+
+
+def recompute_pair(cache, sample: str, manual="keep", mask_changed: bool = False) -> None:
+    cache = Path(cache)
+    manifest = read_manifest(cache)
+    settings = Settings.from_dict(manifest["settings"])
+    old = read_meta(cache, sample)
+    if manual == "keep":
+        manual = (old["shift_y_px"], old["shift_x_px"]) if old["align_method"] == "manual" else None
+    polygons = load_masks(cache / "masks.json").get(sample, [])
+    result = process_pair(Path(manifest["before_dir"]) / old["file"], Path(manifest["after_dir"]) / old["file"],
+                          settings, load_colourmap(settings), polygons, manual=manual, sample=sample)
+    result.meta["mask_changed_at"] = _now() if mask_changed else old.get("mask_changed_at")
+    write_pair(cache, result)
+    write_summary(cache)
+
+
+def zoom_region(cache, sample: str, centre_before_px, size: int = 600):
+    """Full-resolution before/after/difference around a point (row, col) of the before image."""
+    cache = Path(cache)
+    manifest = read_manifest(cache)
+    settings = Settings.from_dict(manifest["settings"])
+    meta = read_meta(cache, sample)
+    cmap = load_colourmap(settings)
+    before = load_image(Path(manifest["before_dir"]) / meta["file"], settings, cmap)
+    after = load_image(Path(manifest["after_dir"]) / meta["file"], settings, cmap)
+    dy, dx = meta["shift_y_px"], meta["shift_x_px"]
+    bs, _ = overlap_slices(before.align.shape, after.align.shape, dy, dx)
+
+    def window(centre, sl):
+        start = int(np.clip(centre - size // 2, sl.start, max(sl.start, sl.stop - size)))
+        return slice(start, min(start + size, sl.stop))
+
+    rows, cols = window(centre_before_px[0], bs[0]), window(centre_before_px[1], bs[1])
+    zb = (rows, cols)
+    za = (slice(rows.start + dy, rows.stop + dy), slice(cols.start + dx, cols.stop + dx))
+    plane = Plane(meta["plane_offset_um"], meta["plane_tilt_x"], meta["plane_tilt_y"])
+    origin = (rows.start - bs[0].start, cols.start - bs[1].start)
+    enc = np.zeros(_shape(zb), bool)
+    d, _, _ = difference_values(before, after, zb, za, settings, enc, plane=plane, plane_origin=origin)
+    return before.rgb[zb], after.rgb[za], d
