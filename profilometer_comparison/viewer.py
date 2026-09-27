@@ -8,7 +8,8 @@ from tkinter import messagebox
 import numpy as np
 from PIL import Image, ImageTk
 
-from .masks import load_masks
+from . import prepare
+from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
@@ -68,6 +69,22 @@ class Viewer:
         r.bind("s", lambda e: self._toggle_flag())
         r.bind("f", lambda e: self._toggle_flagged_only())
         r.protocol("WM_DELETE_WINDOW", self._quit)
+        r.bind("b", lambda e: self._toggle_blink())
+        r.bind("m", lambda e: self._toggle_mask_mode())
+        r.bind("a", lambda e: self._reset_alignment())
+        r.bind("<Return>", lambda e: self._close_polygon())
+        r.bind("<BackSpace>", lambda e: self._undo_point())
+        r.bind("<Delete>", lambda e: self._delete_polygon())
+        r.bind("<Escape>", lambda e: self._leave_mask_mode() if self.mask_mode else None)
+        # Arrow = direction the AFTER image moves on screen.
+        moves = {"Left": (0, 1), "Right": (0, -1), "Up": (1, 0), "Down": (-1, 0)}
+        for key, delta in moves.items():
+            r.bind(f"<Shift-{key}>", lambda e, d=delta: self._nudge(d, 1))
+            for modifier in ("Alt", "Option"):
+                try:
+                    r.bind(f"<Shift-{modifier}-{key}>", lambda e, d=delta: self._nudge(d, 10))
+                except tk.TclError:
+                    pass  # modifier name not known on this platform
 
     # ---------- drawing ----------
     def show(self) -> None:
@@ -191,11 +208,177 @@ class Viewer:
         self.state.toggle_flagged_only()
         self.show()
 
-    def _on_click(self, name: str, event) -> None:
-        pass  # replaced in Task 14 (mask points / zoom)
+    # ---------- blink ----------
+    def _toggle_blink(self) -> None:
+        if self.mask_mode:
+            return
+        self.blinking = not self.blinking
+        if self.blinking:
+            self.panels.pack_forget()
+            self.blink_canvas.pack(side=tk.TOP, before=self.controls)
+            self._blink_tick()
+        else:
+            if self._blink_job:
+                self.root.after_cancel(self._blink_job)
+                self._blink_job = None
+            self.blink_canvas.pack_forget()
+            self.panels.pack(side=tk.TOP, before=self.controls)
+
+    def _blink_tick(self) -> None:
+        self._blink_phase ^= 1
+        self._render_blink()
+        self._blink_job = self.root.after(500, self._blink_tick)
+
+    def _render_blink(self) -> None:
+        showing_after = self._blink_phase == 1
+        img = self.after_img if showing_after else self.before_img
+        scale = self.blink_size / max(img.size)
+        photo = ImageTk.PhotoImage(img.resize((round(img.size[0] * scale), round(img.size[1] * scale)),
+                                              Image.BILINEAR))
+        self._blink_photo = photo
+        ox, oy = self._nudge_offset(scale) if showing_after else (0, 0)
+        c = self.blink_canvas
+        c.delete("all")
+        c.create_image(ox, oy, image=photo, anchor="nw")
+        c.create_text(12, 12, anchor="nw", text="AFTER" if showing_after else "BEFORE",
+                      fill="yellow", font=("TkDefaultFont", 16, "bold"))
+
+    # ---------- manual alignment ----------
+    def _nudge(self, delta, step: int) -> None:
+        if self.mask_mode:
+            return
+        self.nudge[0] += delta[0] * step
+        self.nudge[1] += delta[1] * step
+        self._render_panels()
+        if self.blinking:
+            self._render_blink()
+        self._update_status()
+        if self._nudge_job:
+            self.root.after_cancel(self._nudge_job)
+        self._nudge_job = self.root.after(800, self._flush_nudge)
 
     def _flush_nudge(self) -> None:
-        pass  # replaced in Task 14
+        if self._nudge_job:
+            self.root.after_cancel(self._nudge_job)
+            self._nudge_job = None
+        if self.nudge == [0, 0]:
+            return
+        manual = (self.meta["shift_y_px"] + self.nudge[0], self.meta["shift_x_px"] + self.nudge[1])
+        self.nudge = [0, 0]
+        self._recompute(manual=manual)
+
+    def _reset_alignment(self) -> None:
+        if self.mask_mode:
+            return
+        self.nudge = [0, 0]
+        self._recompute(manual=None)
+
+    def _recompute(self, **kwargs) -> None:
+        self._update_status("Recomputing from the full-resolution originals…")
+        self.root.update_idletasks()
+        try:
+            prepare.recompute_pair(self.state.cache, self.state.current, **kwargs)
+        except Exception as exc:
+            messagebox.showerror("Recompute failed", str(exc))
+        self.state.reload(self.state.current)
+        self.show()
+
+    # ---------- masks ----------
+    def _toggle_mask_mode(self) -> None:
+        if self.mask_mode:
+            self._leave_mask_mode()
+            return
+        if self.blinking:
+            self._toggle_blink()
+        self._flush_nudge()
+        self.mask_mode = True
+        self.points = []
+        self._update_status()
+
+    def _leave_mask_mode(self) -> None:
+        self.mask_mode = False
+        self.points = []
+        if self.masks_dirty:
+            self.masks_dirty = False
+            path = self.state.cache / "masks.json"
+            all_masks = load_masks(path)
+            if self.masks:
+                all_masks[self.state.current] = self.masks
+            else:
+                all_masks.pop(self.state.current, None)
+            save_masks(path, all_masks)
+            self._recompute(manual="keep", mask_changed=True)
+        else:
+            self._render_panels()
+            self._update_status()
+
+    def _close_polygon(self) -> None:
+        if not self.mask_mode or not self.points:
+            return
+        try:
+            validate_polygon(self.points)
+        except ValueError as exc:
+            messagebox.showwarning("Invalid polygon", str(exc))
+            return
+        self.masks.append(list(self.points))
+        self.points = []
+        self.masks_dirty = True
+        self._render_panels()
+        self._update_status()
+
+    def _undo_point(self) -> None:
+        if self.mask_mode and self.points:
+            self.points.pop()
+            self._render_panels()
+
+    def _delete_polygon(self) -> None:
+        if not self.mask_mode:
+            return
+        c = self.canvases["before"]
+        point = self._canvas_to_um(c.winfo_pointerx() - c.winfo_rootx(), c.winfo_pointery() - c.winfo_rooty())
+        for i, poly in enumerate(self.masks):
+            if point_in_polygon(point, poly):
+                del self.masks[i]
+                self.masks_dirty = True
+                self._render_panels()
+                self._update_status()
+                return
+
+    # ---------- click: mask point or zoom ----------
+    def _on_click(self, name: str, event) -> None:
+        if self.mask_mode:
+            if name == "before":
+                self.points.append(self._canvas_to_um(event.x, event.y))
+                self._render_panels()
+            return
+        self._zoom(event.x, event.y)
+
+    def _zoom(self, x: float, y: float) -> None:
+        m, s = self.meta, self.state
+        row = int(y / self.scale * m["display_step"]) + m["before_origin_px"][0]
+        col = int(x / self.scale * m["display_step"]) + m["before_origin_px"][1]
+        size = max(200, min(600, (self.root.winfo_screenwidth() - 60) // 3))
+        self._update_status("Loading full resolution…")
+        self.root.update_idletasks()
+        try:
+            before, after, diff = prepare.zoom_region(s.cache, s.current, (row, col), size=size)
+        except Exception as exc:
+            messagebox.showerror("Zoom failed", str(exc))
+            return
+        top = tk.Toplevel(self.root)
+        top.title(f"{s.current}: zoom at x {col * m['pixel_um']:.0f} µm, y {row * m['pixel_um']:.0f} µm "
+                  f"(full resolution)")
+        photos = []
+        panels = [("before", before), ("after", after),
+                  ("difference", render_difference(diff, s.threshold, s.signed, after))]
+        for i, (label, arr) in enumerate(panels):
+            tk.Label(top, text=label.upper()).grid(row=0, column=i)
+            photo = ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr)))
+            photos.append(photo)
+            tk.Label(top, image=photo).grid(row=1, column=i, padx=4, pady=4)
+        top.photos = photos
+        top.bind("<Escape>", lambda e: top.destroy())
+        self._update_status()
 
     def _quit(self) -> None:
         self._flush_nudge()
