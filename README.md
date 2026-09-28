@@ -4,9 +4,19 @@ Compare **before and after** surface measurements of the same samples, exported 
 
 For every sample, the tool aligns the before and after measurement, computes where and how much the surface changed, and reports the percentage of changed pixels for the **glaze** and, where you mark it, for **encrustation** separately. A keyboard-driven viewer lets you browse all samples, blink between before and after, draw encrustation masks, correct the alignment by hand, and flag samples.
 
-## Installation
+## Quick start
 
-Requires Python 3.10 or newer with tkinter (included in the python.org installers).
+Requires Python 3.10 or newer with tkinter (included in the python.org installers), numpy and Pillow (`python3 -m pip install numpy Pillow`). Then, from any folder:
+
+```bash
+python3 path/to/profilometer-comparison/run.py
+```
+
+A menu offers the three steps below, and folders are chosen with dialogs. `run.py` also accepts all commands and options shown under Usage, for example `python3 run.py view RESULTS`.
+
+## Installation (optional)
+
+Installing makes the `python -m profilometer_comparison` commands and the tests available.
 
 ```bash
 git clone https://github.com/<your-account>/profilometer-comparison.git

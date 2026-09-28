@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -39,8 +40,9 @@ def cmd_prepare(args) -> int:
         run_prepare(before, after, out, settings, masks_file=args.masks)
     except SettingsMismatch as exc:
         raise SystemExit(str(exc))
-    print(f"\nDone. Results: {out / 'summary.csv'}\nOpen the viewer with:\n"
-          f"  python -m profilometer_comparison view \"{out}\"")
+    script = Path(sys.argv[0])
+    launcher = f'python3 "{script.resolve()}"' if script.name == "run.py" else "python -m profilometer_comparison"
+    print(f"\nDone. Results: {out / 'summary.csv'}\nOpen the viewer with:\n  {launcher} view \"{out}\"")
     return 0
 
 
