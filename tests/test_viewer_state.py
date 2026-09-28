@@ -99,3 +99,11 @@ def test_render_difference_unsigned():
     out = render_difference(diff, 5.0, signed=False, after_small=after)
     assert out[0, 0].tolist() == [100, 100, 100]
     assert out[0, 1].tolist() == [255, 0, 200]
+
+
+def test_export_texts(state):
+    state.go(1)
+    title, info = state.export_texts()
+    assert title.startswith("M2 · pseudo-colour · threshold 2 µm · glaze ")
+    assert "% different" in title and "lower" in title
+    assert "shift" in info and "(auto)" in info and "profilometer-comparison 0.1.0" in info

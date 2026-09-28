@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import numpy as np
 
+from . import __version__
 from .difference import percentages
 from .flags import FlagStore
 from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta
@@ -114,3 +116,21 @@ class ViewerState:
     def save_position(self) -> None:
         (self.cache / "state.json").write_text(
             json.dumps({"last_sample": self.current, "threshold": self.threshold}), encoding="utf-8")
+
+    def export_texts(self, sample: str | None = None) -> tuple[str, str]:
+        """Title and info line for an exported figure."""
+        sample = sample or self.current
+        m = self.meta(sample)
+        unit = "µm" if self.signed else "ΔE"
+        parts = [sample, m["type"], f"threshold {self.threshold:g} {unit}"]
+        for region in ("glaze", "encrustation"):
+            p = self.percentages(region=region, sample=sample)
+            if p is None:
+                continue
+            text = f"{region} {p['diff']:.2f} % different"
+            if self.signed:
+                text += f" ({p['lower']:.2f} % lower, {p['higher']:.2f} % higher)"
+            parts.append(text)
+        info = (f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
+                f"file {m['file']} · profilometer-comparison {__version__} · {date.today():%Y-%m-%d}")
+        return " · ".join(parts), info

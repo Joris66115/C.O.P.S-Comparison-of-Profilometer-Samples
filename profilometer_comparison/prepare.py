@@ -394,7 +394,10 @@ def recompute_pair(cache, sample: str, manual="keep", mask_changed: bool = False
 
 
 def zoom_region(cache, sample: str, centre_before_px, size: int = 600):
-    """Full-resolution before/after/difference around a point (row, col) of the before image."""
+    """Full-resolution before/after/difference around a point (row, col) of the before image.
+
+    Returns (before_rgb, after_rgb, difference, (row, col) of the region's top-left in the before image).
+    """
     cache = Path(cache)
     manifest = read_manifest(cache)
     settings = Settings.from_dict(manifest["settings"])
@@ -416,4 +419,4 @@ def zoom_region(cache, sample: str, centre_before_px, size: int = 600):
     origin = (rows.start - bs[0].start, cols.start - bs[1].start)
     enc = np.zeros(_shape(zb), bool)
     d, _, _ = difference_values(before, after, zb, za, settings, enc, plane=plane, plane_origin=origin)
-    return before.rgb[zb], after.rgb[za], d
+    return before.rgb[zb], after.rgb[za], d, (rows.start, cols.start)

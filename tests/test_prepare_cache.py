@@ -85,6 +85,7 @@ def test_recompute_manual_and_back(folders, tmp_path):
 
 def test_zoom_region(folders, tmp_path):
     cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
-    b, a, d = zoom_region(cache, "M35", (380, 380), size=200)
+    b, a, d, origin = zoom_region(cache, "M35", (380, 380), size=200)
     assert b.shape == a.shape == (200, 200, 3)
     assert d.shape == (200, 200)
+    assert origin == (280, 280)

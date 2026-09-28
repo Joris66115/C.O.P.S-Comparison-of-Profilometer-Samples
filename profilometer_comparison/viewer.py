@@ -9,11 +9,12 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import prepare
+from .export import region_summary, render_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
-        "Shift+arrows nudge (Shift+Alt: ×10)   a auto-align   click: zoom")
+        "Shift+arrows nudge (Shift+Alt: ×10)   a auto-align   e export JPG   click: zoom")
 
 
 class Viewer:
@@ -72,6 +73,7 @@ class Viewer:
         r.bind("b", lambda e: self._toggle_blink())
         r.bind("m", lambda e: self._toggle_mask_mode())
         r.bind("a", lambda e: self._reset_alignment())
+        r.bind("e", lambda e: self._export_overview())
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
         r.bind("<Delete>", lambda e: self._delete_polygon())
@@ -361,7 +363,7 @@ class Viewer:
         self._update_status("Loading full resolution…")
         self.root.update_idletasks()
         try:
-            before, after, diff = prepare.zoom_region(s.cache, s.current, (row, col), size=size)
+            before, after, diff, origin = prepare.zoom_region(s.cache, s.current, (row, col), size=size)
         except Exception as exc:
             messagebox.showerror("Zoom failed", str(exc))
             return
@@ -369,16 +371,65 @@ class Viewer:
         top.title(f"{s.current}: zoom at x {col * m['pixel_um']:.0f} µm, y {row * m['pixel_um']:.0f} µm "
                   f"(full resolution)")
         photos = []
-        panels = [("before", before), ("after", after),
-                  ("difference", render_difference(diff, s.threshold, s.signed, after))]
+        diff_rgb = render_difference(diff, s.threshold, s.signed, after)
+        panels = [("before", before), ("after", after), ("difference", diff_rgb)]
         for i, (label, arr) in enumerate(panels):
             tk.Label(top, text=label.upper()).grid(row=0, column=i)
             photo = ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr)))
             photos.append(photo)
             tk.Label(top, image=photo).grid(row=1, column=i, padx=4, pady=4)
         top.photos = photos
+
+        def export(_event=None):
+            self._export_zoom(before, after, diff, diff_rgb, origin, (row, col))
+
+        tk.Button(top, text="Export JPG (e)", command=export).grid(row=2, column=0, columnspan=3, pady=4)
+        top.bind("e", export)
         top.bind("<Escape>", lambda e: top.destroy())
         self._update_status()
+
+    # ---------- export ----------
+    def _mask_pixels(self, origin_px, step: int) -> list:
+        """Mask polygons in pixel coordinates of an image whose top-left is `origin_px` (before image)."""
+        px = self.meta["pixel_um"]
+        return [[((x / px - origin_px[1]) / step, (y / px - origin_px[0]) / step) for x, y in poly]
+                for poly in self.masks]
+
+    def _save_export(self, image: Image.Image, name: str) -> None:
+        folder = self.state.cache / "exports"
+        folder.mkdir(exist_ok=True)
+        path = folder / name
+        image.save(path, quality=95)
+        self._update_status(f"Exported {path}")
+
+    def _threshold_tag(self) -> str:
+        return f"{self.state.threshold:g}um" if self.state.signed else f"dE{self.state.threshold:g}"
+
+    def _export_overview(self) -> None:
+        if self.mask_mode:
+            return
+        s, m = self.state, self.meta
+        title, info = s.export_texts()
+        step = m["display_step"]
+        figure = render_export(
+            self.before_img, self.after_img,
+            render_difference(self.diff, s.threshold, s.signed, np.asarray(self.after_img)),
+            um_per_px=m["pixel_um"] * step, title=title, info=info, signed=s.signed, threshold=s.threshold,
+            cmap=prepare.load_colourmap(s.settings), polygons=self._mask_pixels(m["before_origin_px"], step))
+        self._save_export(figure, f"{s.current}-overview-{self._threshold_tag()}.jpg")
+
+    def _export_zoom(self, before, after, diff, diff_rgb, origin, centre) -> None:
+        s, m = self.state, self.meta
+        title, info = s.export_texts()
+        x_um, y_um = centre[1] * m["pixel_um"], centre[0] * m["pixel_um"]
+        title = (f"{s.current} · zoom at x {x_um:.0f} µm, y {y_um:.0f} µm (full resolution) · this region: "
+                 f"{region_summary(diff, s.threshold, s.signed)}\nWhole sample: {title}")
+        figure = render_export(
+            Image.fromarray(np.ascontiguousarray(before)), Image.fromarray(np.ascontiguousarray(after)), diff_rgb,
+            um_per_px=m["pixel_um"], title=title, info=info, signed=s.signed,
+            threshold=s.threshold, cmap=prepare.load_colourmap(s.settings),
+            polygons=self._mask_pixels(origin, 1))
+        self._save_export(figure, f"{s.current}-zoom-x{x_um:.0f}um-y{y_um:.0f}um-{self._threshold_tag()}.jpg")
 
     def _quit(self) -> None:
         self._flush_nudge()
