@@ -4,6 +4,7 @@ import shutil
 import numpy as np
 import pytest
 
+from profilometer_comparison import __version__
 from profilometer_comparison.flags import FlagStore
 from profilometer_comparison.prepare import Settings, run_prepare
 from profilometer_comparison.viewer_state import ViewerState, render_difference
@@ -106,4 +107,4 @@ def test_export_texts(state):
     title, info = state.export_texts()
     assert title.startswith("M2 · pseudo-colour · threshold 2 µm · glaze ")
     assert "% different" in title and "lower" in title
-    assert "shift" in info and "(auto)" in info and "profilometer-comparison 0.1.0" in info
+    assert "shift" in info and "(auto)" in info and f"profilometer-comparison {__version__}" in info

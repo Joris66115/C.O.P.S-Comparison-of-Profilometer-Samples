@@ -3,13 +3,14 @@ import shutil
 
 import pytest
 
+from profilometer_comparison import __version__
 from profilometer_comparison.__main__ import main
 
 
 def test_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
-    assert "0.1.0" in capsys.readouterr().out
+    assert __version__ in capsys.readouterr().out
 
 
 def test_prepare_command(tmp_path, data_dir, capsys):
