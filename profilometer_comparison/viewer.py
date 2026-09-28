@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import prepare
-from .export import region_summary, render_export
+from .export import _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference
 
@@ -356,36 +356,15 @@ class Viewer:
         self._zoom(event.x, event.y)
 
     def _zoom(self, x: float, y: float) -> None:
-        m, s = self.meta, self.state
+        m = self.meta
         row = int(y / self.scale * m["display_step"]) + m["before_origin_px"][0]
         col = int(x / self.scale * m["display_step"]) + m["before_origin_px"][1]
-        size = max(200, min(600, (self.root.winfo_screenwidth() - 60) // 3))
         self._update_status("Loading full resolution…")
         self.root.update_idletasks()
         try:
-            before, after, diff, origin = prepare.zoom_region(s.cache, s.current, (row, col), size=size)
+            ZoomWindow(self, (row, col))
         except Exception as exc:
             messagebox.showerror("Zoom failed", str(exc))
-            return
-        top = tk.Toplevel(self.root)
-        top.title(f"{s.current}: zoom at x {col * m['pixel_um']:.0f} µm, y {row * m['pixel_um']:.0f} µm "
-                  f"(full resolution)")
-        photos = []
-        diff_rgb = render_difference(diff, s.threshold, s.signed, after)
-        panels = [("before", before), ("after", after), ("difference", diff_rgb)]
-        for i, (label, arr) in enumerate(panels):
-            tk.Label(top, text=label.upper()).grid(row=0, column=i)
-            photo = ImageTk.PhotoImage(Image.fromarray(np.ascontiguousarray(arr)))
-            photos.append(photo)
-            tk.Label(top, image=photo).grid(row=1, column=i, padx=4, pady=4)
-        top.photos = photos
-
-        def export(_event=None):
-            self._export_zoom(before, after, diff, diff_rgb, origin, (row, col))
-
-        tk.Button(top, text="Export JPG (e)", command=export).grid(row=2, column=0, columnspan=3, pady=4)
-        top.bind("e", export)
-        top.bind("<Escape>", lambda e: top.destroy())
         self._update_status()
 
     # ---------- export ----------
@@ -418,23 +397,118 @@ class Viewer:
             cmap=prepare.load_colourmap(s.settings), polygons=self._mask_pixels(m["before_origin_px"], step))
         self._save_export(figure, f"{s.current}-overview-{self._threshold_tag()}.jpg")
 
-    def _export_zoom(self, before, after, diff, diff_rgb, origin, centre) -> None:
-        s, m = self.state, self.meta
-        title, info = s.export_texts()
-        x_um, y_um = centre[1] * m["pixel_um"], centre[0] * m["pixel_um"]
-        title = (f"{s.current} · zoom at x {x_um:.0f} µm, y {y_um:.0f} µm (full resolution) · this region: "
-                 f"{region_summary(diff, s.threshold, s.signed)}\nWhole sample: {title}")
-        figure = render_export(
-            Image.fromarray(np.ascontiguousarray(before)), Image.fromarray(np.ascontiguousarray(after)), diff_rgb,
-            um_per_px=m["pixel_um"], title=title, info=info, signed=s.signed,
-            threshold=s.threshold, cmap=prepare.load_colourmap(s.settings),
-            polygons=self._mask_pixels(origin, 1))
-        self._save_export(figure, f"{s.current}-zoom-x{x_um:.0f}um-y{y_um:.0f}um-{self._threshold_tag()}.jpg")
-
     def _quit(self) -> None:
         self._flush_nudge()
         self.state.save_position()
         self.root.destroy()
+
+
+class ZoomWindow:
+    """Full-resolution before/after/difference around a point, with adjustable field of view."""
+
+    def __init__(self, viewer: Viewer, centre: tuple[int, int]):
+        self.viewer = viewer
+        state = viewer.state
+        self.sample = state.current
+        self.masks = list(viewer.masks)
+        self.source = prepare.ZoomSource(state.cache, self.sample)
+        self.centre = centre
+        self.size_index = prepare.ZOOM_SIZES.index(600)
+        self.panel = max(250, min(600, (viewer.root.winfo_screenwidth() - 60) // 3))
+
+        self.top = tk.Toplevel(viewer.root)
+        self.images = []
+        for i, name in enumerate(("BEFORE", "AFTER (aligned)", "DIFFERENCE")):
+            tk.Label(self.top, text=name).grid(row=0, column=i)
+            label = tk.Label(self.top)
+            label.grid(row=1, column=i, padx=4, pady=4)
+            self.images.append(label)
+        self.info = tk.Label(self.top, anchor="w", justify=tk.LEFT, font=("TkFixedFont", 12))
+        self.info.grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
+        tk.Label(self.top, anchor="w", fg="grey40",
+                 text="+ / − or scroll: zoom   arrows: move   e: export JPG   Esc: close").grid(
+            row=3, column=0, columnspan=3, sticky="w", padx=6)
+        tk.Button(self.top, text="Export JPG (e)", command=self.export).grid(row=4, column=0, columnspan=3, pady=4)
+
+        t = self.top
+        for key in ("<plus>", "<equal>", "<KP_Add>"):
+            t.bind(key, lambda e: self.zoom(-1))
+        for key in ("<minus>", "<underscore>", "<KP_Subtract>"):
+            t.bind(key, lambda e: self.zoom(1))
+        t.bind("<MouseWheel>", lambda e: self.zoom(-1 if e.delta > 0 else 1))
+        t.bind("<Button-4>", lambda e: self.zoom(-1))
+        t.bind("<Button-5>", lambda e: self.zoom(1))
+        for key, (dr, dc) in {"Left": (0, -1), "Right": (0, 1), "Up": (-1, 0), "Down": (1, 0)}.items():
+            t.bind(f"<{key}>", lambda e, d=(dr, dc): self.pan(*d))
+        t.bind("e", lambda e: self.export())
+        t.bind("<Escape>", lambda e: t.destroy())
+        self.render()
+        t.focus_force()
+
+    @property
+    def size(self) -> int:
+        return prepare.ZOOM_SIZES[self.size_index]
+
+    def zoom(self, direction: int) -> None:
+        """direction -1: zoom in (smaller field of view), +1: zoom out."""
+        self.size_index = max(0, min(self.size_index + direction, len(prepare.ZOOM_SIZES) - 1))
+        self.render()
+
+    def pan(self, d_row: int, d_col: int) -> None:
+        step = self.size // 2
+        self.centre = (self.centre[0] + d_row * step, self.centre[1] + d_col * step)
+        self.render()
+
+    def _mask_pixels(self, origin, scale: float) -> list:
+        px = self.source.pixel_um
+        return [[((x / px - origin[1]) * scale, (y / px - origin[0]) * scale) for x, y in poly]
+                for poly in self.masks]
+
+    def render(self) -> None:
+        state = self.viewer.state
+        before, after, diff, origin, self.centre = self.source.region(self.centre, self.size)
+        self.region = (before, after, diff, origin)
+        diff_rgb = render_difference(diff, state.threshold, state.signed, after)
+        h, w = diff.shape
+        scale = self.panel / max(h, w)
+        size = (max(1, round(w * scale)), max(1, round(h * scale)))
+        resample = Image.NEAREST if scale >= 1 else Image.BOX
+        self.photos = []
+        for label, arr in zip(self.images, (before, after, diff_rgb)):
+            img = Image.fromarray(np.ascontiguousarray(arr)).resize(size, resample)
+            if self.masks:
+                _draw_polygons(img, self._mask_pixels(origin, scale), 2)
+            photo = ImageTk.PhotoImage(img)
+            self.photos.append(photo)
+            label.config(image=photo)
+        px = self.source.pixel_um
+        cx, cy = self.centre[1] * px, self.centre[0] * px
+        unit = "µm" if state.signed else "ΔE"
+        field = f"{format_length(w * px)} × {format_length(h * px)}"
+        self.top.title(f"{self.sample}: zoom at x {cx:.0f} µm, y {cy:.0f} µm, field of view {field}")
+        self.info.config(text=f"field of view {field} ({w} × {h} px)   centre x {cx:.0f} µm, y {cy:.0f} µm\n"
+                              f"this region: {region_summary(diff, state.threshold, state.signed)}   "
+                              f"(threshold {state.threshold:g} {unit})")
+
+    def export(self) -> None:
+        viewer, state = self.viewer, self.viewer.state
+        before, after, diff, origin = self.region
+        images = [Image.fromarray(np.ascontiguousarray(a)) for a in
+                  (before, after, render_difference(diff, state.threshold, state.signed, after))]
+        images, factor = upscale_for_export(images)
+        px = self.source.pixel_um
+        cx, cy = self.centre[1] * px, self.centre[0] * px
+        title, info = state.export_texts(self.sample)
+        title = (f"{self.sample} · zoom at x {cx:.0f} µm, y {cy:.0f} µm, field of view "
+                 f"{format_length(diff.shape[1] * px)} · this region: "
+                 f"{region_summary(diff, state.threshold, state.signed)}\nWhole sample: {title}")
+        figure = render_export(images[0], images[1], np.asarray(images[2]), um_per_px=px / factor, title=title,
+                               info=info, signed=state.signed, threshold=state.threshold,
+                               cmap=prepare.load_colourmap(state.settings),
+                               polygons=self._mask_pixels(origin, factor))
+        name = f"{self.sample}-zoom-x{cx:.0f}um-y{cy:.0f}um-{self.size}px-{viewer._threshold_tag()}.jpg"
+        viewer._save_export(figure, name)
+        self.info.config(text=self.info.cget("text") + f"\nExported {name}")
 
 
 def run_viewer(cache: str | Path) -> None:

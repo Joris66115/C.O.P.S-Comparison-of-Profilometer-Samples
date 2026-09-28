@@ -393,30 +393,48 @@ def recompute_pair(cache, sample: str, manual="keep", mask_changed: bool = False
     write_summary(cache)
 
 
+ZOOM_SIZES = (150, 300, 600, 1200, 2400)  # zoom field of view in full-resolution pixels
+
+
+class ZoomSource:
+    """Full-resolution before/after of one sample, loaded once, for repeated zoom crops."""
+
+    def __init__(self, cache, sample: str):
+        cache = Path(cache)
+        manifest = read_manifest(cache)
+        self.settings = Settings.from_dict(manifest["settings"])
+        self.meta = read_meta(cache, sample)
+        cmap = load_colourmap(self.settings)
+        self.before = load_image(Path(manifest["before_dir"]) / self.meta["file"], self.settings, cmap)
+        self.after = load_image(Path(manifest["after_dir"]) / self.meta["file"], self.settings, cmap)
+        self.dy, self.dx = self.meta["shift_y_px"], self.meta["shift_x_px"]
+        self.overlap, _ = overlap_slices(self.before.align.shape, self.after.align.shape, self.dy, self.dx)
+        self.plane = Plane(self.meta["plane_offset_um"], self.meta["plane_tilt_x"], self.meta["plane_tilt_y"])
+        self.pixel_um = self.before.pixel_um
+
+    def region(self, centre_before_px, size: int):
+        """Crop of `size` x `size` px around (row, col) of the before image, kept inside the overlap.
+
+        Returns (before_rgb, after_rgb, difference, origin (row, col), centre (row, col) after clamping).
+        """
+        def window(centre, sl):
+            start = int(np.clip(centre - size // 2, sl.start, max(sl.start, sl.stop - size)))
+            return slice(start, min(start + size, sl.stop))
+
+        rows, cols = window(centre_before_px[0], self.overlap[0]), window(centre_before_px[1], self.overlap[1])
+        zb = (rows, cols)
+        za = (slice(rows.start + self.dy, rows.stop + self.dy), slice(cols.start + self.dx, cols.stop + self.dx))
+        origin = (rows.start - self.overlap[0].start, cols.start - self.overlap[1].start)
+        enc = np.zeros(_shape(zb), bool)
+        d, _, _ = difference_values(self.before, self.after, zb, za, self.settings, enc,
+                                    plane=self.plane, plane_origin=origin)
+        centre = (rows.start + (rows.stop - rows.start) // 2, cols.start + (cols.stop - cols.start) // 2)
+        return self.before.rgb[zb], self.after.rgb[za], d, (rows.start, cols.start), centre
+
+
 def zoom_region(cache, sample: str, centre_before_px, size: int = 600):
     """Full-resolution before/after/difference around a point (row, col) of the before image.
 
     Returns (before_rgb, after_rgb, difference, (row, col) of the region's top-left in the before image).
     """
-    cache = Path(cache)
-    manifest = read_manifest(cache)
-    settings = Settings.from_dict(manifest["settings"])
-    meta = read_meta(cache, sample)
-    cmap = load_colourmap(settings)
-    before = load_image(Path(manifest["before_dir"]) / meta["file"], settings, cmap)
-    after = load_image(Path(manifest["after_dir"]) / meta["file"], settings, cmap)
-    dy, dx = meta["shift_y_px"], meta["shift_x_px"]
-    bs, _ = overlap_slices(before.align.shape, after.align.shape, dy, dx)
-
-    def window(centre, sl):
-        start = int(np.clip(centre - size // 2, sl.start, max(sl.start, sl.stop - size)))
-        return slice(start, min(start + size, sl.stop))
-
-    rows, cols = window(centre_before_px[0], bs[0]), window(centre_before_px[1], bs[1])
-    zb = (rows, cols)
-    za = (slice(rows.start + dy, rows.stop + dy), slice(cols.start + dx, cols.stop + dx))
-    plane = Plane(meta["plane_offset_um"], meta["plane_tilt_x"], meta["plane_tilt_y"])
-    origin = (rows.start - bs[0].start, cols.start - bs[1].start)
-    enc = np.zeros(_shape(zb), bool)
-    d, _, _ = difference_values(before, after, zb, za, settings, enc, plane=plane, plane_origin=origin)
-    return before.rgb[zb], after.rgb[za], d, (rows.start, cols.start)
+    return ZoomSource(cache, sample).region(centre_before_px, size)[:4]

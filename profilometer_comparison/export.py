@@ -52,6 +52,15 @@ def region_summary(diff: np.ndarray, threshold: float, signed: bool) -> str:
     return f"{lower + higher:.2f} % different ({lower:.2f} % lower, {higher:.2f} % higher)"
 
 
+def upscale_for_export(images: list, min_px: int = 1000) -> tuple[list, int]:
+    """Enlarge small images by an integer factor (no smoothing) so the longest side is at least `min_px`."""
+    longest = max(max(img.size) for img in images)
+    factor = max(1, math.ceil(min_px / longest))
+    if factor == 1:
+        return images, 1
+    return [img.resize((img.width * factor, img.height * factor), Image.NEAREST) for img in images], factor
+
+
 @lru_cache(maxsize=1)
 def _font_path() -> str | None:
     for name in FONT_CANDIDATES:

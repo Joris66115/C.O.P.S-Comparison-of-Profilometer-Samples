@@ -74,14 +74,27 @@ python -m profilometer_comparison view RESULTS
 | m | mask mode: click points around encrustation on the BEFORE panel, Enter closes the polygon, Backspace undoes a point, Delete removes the polygon under the cursor, m or Esc finishes |
 | Shift + arrows | move the after image by 1 pixel to correct the alignment (Shift + Alt/Option: 10 pixels) |
 | a | back to automatic alignment |
-| click | full-resolution zoom of that spot |
+| click | open a full-resolution zoom window at that spot |
 | e | export the current sample as a JPG figure (also in the zoom window, at full resolution) |
 
 In the difference panel, **blue** is lower after treatment (material lost), **red** is higher, and grey is below the threshold.
 
+### Zoom window
+
+Click a panel to open a zoom window at that spot. The full-resolution images are loaded once (about 2 s); after that everything is instant.
+
+| Key | Action |
+|---|---|
+| + / − or scroll wheel | zoom in / out: field of view 0.2, 0.4, 0.8, 1.6 or 3.2 mm (150–2400 measured points) |
+| arrows | move the view by half its width |
+| e | export the current view as a JPG |
+| Esc | close |
+
+The window shows the field of view, its position and the percentage of changed pixels in this region.
+
 ### Exported figures
 
-Press **e** to save a JPG of the before, after and difference panels in `RESULTS/exports/`, for example `M17-overview-2um.jpg`. In a zoom window, **e** (or the Export button) saves the zoomed region at full resolution, for example `M17-zoom-x4620um-y4620um-2um.jpg`, with the percentages of that region and of the whole sample. Every figure has a scale bar on each panel (calculated from the pixel size, so correct at any zoom), a legend (height scale, difference colours, mask outline) and a line with the alignment shift, file name, tool version and date.
+Press **e** to save a JPG of the before, after and difference panels in `RESULTS/exports/`, for example `M17-overview-2um.jpg`. In a zoom window, **e** (or the Export button) saves the current view, for example `M17-zoom-x4620um-y4620um-600px-2um.jpg`. Large views are exported at full resolution; small views are enlarged without smoothing to at least 1000 px per panel, so individual measurement points stay visible. The figure lists the percentages of that region and of the whole sample. Every figure has a scale bar on each panel (calculated from the pixel size, so correct at any zoom), a legend (height scale, difference colours, mask outline) and a line with the alignment shift, file name, tool version and date.
 
 Masks are stored in µm, so a `masks.json` made for pseudo-colour can be reused for true colour: `prepare --masks RESULTS/masks.json ...`.
 

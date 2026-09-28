@@ -69,3 +69,13 @@ def test_region_summary():
     text = region_summary(d, 2.0, signed=True)
     assert text == "27.78 % different (22.22 % lower, 5.56 % higher)"
     assert region_summary(np.array([[1.0, 8.0]]), 5.0, signed=False) == "50.00 % different"
+
+
+def test_upscale_for_export():
+    from profilometer_comparison.export import upscale_for_export
+    small = Image.new("RGB", (150, 120))
+    images, factor = upscale_for_export([small, small], min_px=1000)
+    assert factor == 7 and images[0].size == (1050, 840)
+    big = Image.new("RGB", (1200, 1200))
+    images, factor = upscale_for_export([big], min_px=1000)
+    assert factor == 1 and images[0] is big

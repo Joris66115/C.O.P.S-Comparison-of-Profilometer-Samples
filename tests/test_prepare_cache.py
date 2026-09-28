@@ -89,3 +89,19 @@ def test_zoom_region(folders, tmp_path):
     assert b.shape == a.shape == (200, 200, 3)
     assert d.shape == (200, 200)
     assert origin == (280, 280)
+
+
+def test_zoom_source_crops_and_clamps(folders, tmp_path):
+    from profilometer_comparison.prepare import ZoomSource
+    cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
+    src = ZoomSource(cache, "M35")
+    b, a, d, origin, centre = src.region((380, 380), 150)
+    assert b.shape == (150, 150, 3) and d.shape == (150, 150)
+    assert origin == (305, 305) and centre == (380, 380)
+    # near the edge the window is pushed inside the overlap and the centre moves with it
+    b, a, d, origin, centre = src.region((0, 0), 300)
+    assert origin == (src.overlap[0].start, src.overlap[1].start)
+    assert centre == (origin[0] + 150, origin[1] + 150)
+    # a window larger than the overlap is limited to the overlap
+    b, *_ = src.region((380, 380), 2400)
+    assert b.shape[0] <= 768 and b.shape[1] <= 768
