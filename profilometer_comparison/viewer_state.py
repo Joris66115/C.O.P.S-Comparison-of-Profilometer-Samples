@@ -21,6 +21,18 @@ NO_DATA = (255, 255, 255)
 MARKED = (255, 0, 200)
 
 
+REGION_LABELS = {"glaze": "Glaze (outside encrustation masks)", "encrustation": "Encrustation (inside masks)"}
+WHOLE_SURFACE = "Whole surface"
+
+
+def change_sentence(p: dict, threshold: float, signed: bool) -> str:
+    """'x % of the area changed by ≥ t µm (y % lowered, z % raised)' for a percentages() result."""
+    if signed:
+        return (f"{p['diff']:.2f} % of the area changed by ≥ {threshold:g} µm "
+                f"({p['lower']:.2f} % lowered, {p['higher']:.2f} % raised)")
+    return f"{p['diff']:.2f} % of the area changed by ΔE ≥ {threshold:g}"
+
+
 def render_difference(diff: np.ndarray, threshold: float, signed: bool,
                       after_small: np.ndarray | None = None) -> np.ndarray:
     """Colour image of the difference: blue lower / red higher (height) or magenta over a grey after image (colour)."""
@@ -117,20 +129,20 @@ class ViewerState:
         (self.cache / "state.json").write_text(
             json.dumps({"last_sample": self.current, "threshold": self.threshold}), encoding="utf-8")
 
+    def region_lines(self, sample: str | None = None) -> list[str]:
+        """One line per region: 'Whole surface: …', or glaze and encrustation separately when masked."""
+        sample = sample or self.current
+        if self.percentages(region="encrustation", sample=sample) is None:
+            p = self.percentages(region="glaze", sample=sample)
+            return [f"{WHOLE_SURFACE}: {change_sentence(p, self.threshold, self.signed)}"]
+        return [f"{label}: {change_sentence(self.percentages(region=region, sample=sample), self.threshold, self.signed)}"
+                for region, label in REGION_LABELS.items()]
+
     def export_texts(self, sample: str | None = None) -> tuple[str, str]:
-        """Title and info line for an exported figure."""
+        """Title (one line per region) and info line for an exported figure."""
         sample = sample or self.current
         m = self.meta(sample)
-        unit = "µm" if self.signed else "ΔE"
-        parts = [sample, m["type"], f"threshold {self.threshold:g} {unit}"]
-        for region in ("glaze", "encrustation"):
-            p = self.percentages(region=region, sample=sample)
-            if p is None:
-                continue
-            text = f"{region} {p['diff']:.2f} % different"
-            if self.signed:
-                text += f" ({p['lower']:.2f} % lower, {p['higher']:.2f} % higher)"
-            parts.append(text)
+        title = f"{sample} · {m['type']} · " + "\n".join(self.region_lines(sample))
         info = (f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
                 f"file {m['file']} · profilometer-comparison {__version__} · {date.today():%Y-%m-%d}")
-        return " · ".join(parts), info
+        return title, info

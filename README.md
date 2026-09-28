@@ -77,7 +77,9 @@ python -m profilometer_comparison view RESULTS
 | click | open a full-resolution zoom window at that spot |
 | e | export the current sample as a JPG figure (also in the zoom window, at full resolution) |
 
-In the difference panel, **blue** is lower after treatment (material lost), **red** is higher, and grey is below the threshold.
+In the difference panel, **blue** means the surface was lowered by at least the threshold (material lost), **red** that it was raised by at least the threshold (material added), **grey** that it changed by less than the threshold (no significant change), and white that there is no data. Δh = height after − height before.
+
+The percentages read, for example, *"Whole surface: 3.21 % of the area changed by ≥ 5 µm (2.90 % lowered, 0.31 % raised)"*: 3.21 % of the measured area changed in height by 5 µm or more, of which 2.90 % became lower and 0.31 % higher. For samples with encrustation masks, the glaze (outside the masks) and the encrustation (inside the masks) are reported separately.
 
 ### Zoom window
 
@@ -110,7 +112,7 @@ python -m profilometer_comparison view --before BEFORE --after AFTER
 2. **Colour.** sRGB is converted to CIELAB (D65) and compared as ΔE\*ab (CIE76). `mean_dL` shows a global brightness change, for example from lighting.
 3. **Alignment.** Translation only, since samples sit in a fixture. Phase correlation runs on 4× downsampled images and is then refined at full resolution. It is repeated using only pixels that did not change much and are not masked as encrustation, so cleaned areas do not pull the alignment. `align_confidence` is the peak-to-sidelobe ratio of the correlation. Unrelated surfaces give 7–8, and below 20 the sample is marked "low confidence". Alignment matters: shifting an identical surface by only 3 pixels (4 µm) already makes 3.5 % of the pixels exceed 2 µm.
 4. **Offset and tilt.** Each scan is levelled on its own. A plane (offset + tilt), fitted on the glaze pixels, is therefore subtracted from the height difference. **Consequence:** a uniform loss of material over the whole field cannot be detected, only local changes. This can be switched off with `--no-plane-correction`.
-5. **Percentages.** A pixel counts as changed when |after − before| ≥ threshold. Height changes are split into *lower* (material lost) and *higher*. Percentages are calculated from full-resolution histograms (bin 0.05) of the overlap area, per region: `all`, `glaze` (outside masks) and `encrustation` (inside masks).
+5. **Percentages.** A pixel counts as changed when |after − before| ≥ threshold. Height changes are split into *lowered* (material lost) and *raised* (material added). Percentages are calculated from full-resolution histograms (bin 0.05) of the overlap area, per region: `all`, `glaze` (outside masks) and `encrustation` (inside masks).
 
 ## Validation
 

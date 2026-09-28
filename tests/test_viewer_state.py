@@ -105,6 +105,17 @@ def test_render_difference_unsigned():
 def test_export_texts(state):
     state.go(1)
     title, info = state.export_texts()
-    assert title.startswith("M2 · pseudo-colour · threshold 2 µm · glaze ")
-    assert "% different" in title and "lower" in title
+    assert title.startswith("M2 · pseudo-colour · Whole surface: ")
+    assert "% of the area changed by ≥ 2 µm (" in title and "% lowered, " in title and "% raised)" in title
     assert "shift" in info and "(auto)" in info and f"profilometer-comparison {__version__}" in info
+
+
+def test_region_lines_without_and_with_masks(state):
+    lines = state.region_lines()
+    assert len(lines) == 1 and lines[0].startswith("Whole surface: ")
+    # a sample with an encrustation mask reports glaze and encrustation separately
+    state.percentages()  # loads the histograms into the state's cache
+    state._hists[state.current]["encrustation"] = state._hists[state.current]["glaze"]
+    lines = state.region_lines()
+    assert lines[0].startswith("Glaze (outside encrustation masks): ")
+    assert lines[1].startswith("Encrustation (inside masks): ")

@@ -9,7 +9,9 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .colourmap import Colourmap
-from .viewer_state import HIGHER, LOWER, MARKED, NO_DATA, UNCHANGED
+from .viewer_state import HIGHER, LOWER, MARKED, NO_DATA, UNCHANGED, change_sentence
+
+GREY_AFTER = (150, 150, 150)  # legend swatch for 'after image shown in grey' (true-colour)
 
 MASK_COLOUR = (255, 220, 0)
 TEXT = (20, 20, 20)
@@ -59,9 +61,21 @@ def region_summary(diff: np.ndarray, threshold: float, signed: bool) -> str:
     if d.size == 0:
         return "no data"
     if not signed:
-        return f"{100 * np.mean(d >= threshold):.2f} % different"
+        return change_sentence({"diff": 100 * np.mean(d >= threshold)}, threshold, signed)
     lower, higher = 100 * np.mean(d <= -threshold), 100 * np.mean(d >= threshold)
-    return f"{lower + higher:.2f} % different ({lower:.2f} % lower, {higher:.2f} % higher)"
+    return change_sentence({"diff": lower + higher, "lower": lower, "higher": higher}, threshold, signed)
+
+
+def difference_legend(threshold: float, signed: bool) -> tuple[list[tuple[tuple, str]], str]:
+    """(colour, label) entries of the difference map, and an explanatory note."""
+    if signed:
+        return [(LOWER, f"lowered by ≥ {threshold:g} µm (material lost)"),
+                (HIGHER, f"raised by ≥ {threshold:g} µm (material added)"),
+                (UNCHANGED, f"changed by < {threshold:g} µm (no significant change)"),
+                (NO_DATA, "no data")], "Δh = height after − height before"
+    return [(MARKED, f"colour changed by ΔE ≥ {threshold:g}"),
+            (GREY_AFTER, f"colour changed by ΔE < {threshold:g} (after image in grey)"),
+            (NO_DATA, "no data")], "ΔE = colour difference between after and before (CIE76)"
 
 
 def upscale_for_export(images: list, min_px: int = 1000) -> tuple[list, int]:
@@ -172,7 +186,6 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
     w, h = before.size
     fs = max(14, w // 45)
     m = fs
-    unit = "µm" if signed else "ΔE"
 
     panels = []
     for img in (before.convert("RGB"), after.convert("RGB"), Image.fromarray(diff_rgb).convert("RGB")):
@@ -188,22 +201,10 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
     label_h, legend_h, info_h = round(fs * 1.6), round(fs * 2.2), round(fs * 1.6)
     width = 3 * w + 4 * m
 
-    # Difference legend, wrapped to the width of the difference panel
-    if signed:
-        entries = [(LOWER, f"lower ≥ {threshold:g} {unit}"), (HIGHER, f"higher ≥ {threshold:g} {unit}"),
-                   (UNCHANGED, f"|Δh| < {threshold:g} {unit}"), (NO_DATA, "no data")]
-    else:
-        entries = [(MARKED, f"ΔE ≥ {threshold:g}"), ((150, 150, 150), "below threshold (after image, grey)")]
-    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    positions, x, row = [], 0, 0
-    for colour, text in entries:
-        item_w = round(fs * 1.4 + _length(measure, text, font))
-        if x > 0 and x + item_w > w:
-            x, row = 0, row + 1
-        positions.append((x, row, colour, text))
-        x += item_w + fs
+    # Difference legend: one entry per line under the difference panel, then a note on Δh / ΔE
+    entries, note = difference_legend(threshold, signed)
     row_h = round(fs * 1.6)
-    diff_legend_h = (row + 1) * row_h
+    diff_legend_h = (len(entries) + 1) * row_h
 
     inset = _render_locator(locator, max(160, w // 3), max(10, fs * 2 // 3)) if locator else None
     inset_label_h = round(fs * 1.5)
@@ -228,10 +229,11 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
 
     # Under the difference panel: its colour legend, then (zoom exports) the location map
     diff_x = m + 2 * (w + m)
-    for dx, r, colour, text in positions:
+    for r, (colour, text) in enumerate(entries):
         yy = y + r * row_h
-        draw.rectangle([diff_x + dx, yy, diff_x + dx + fs, yy + fs], fill=colour, outline=TEXT)
-        _text(draw, (diff_x + dx + fs * 1.4, yy), text, font)
+        draw.rectangle([diff_x, yy, diff_x + fs, yy + fs], fill=colour, outline=TEXT)
+        _text(draw, (diff_x + fs * 1.4, yy), text, font)
+    _text(draw, (diff_x, y + len(entries) * row_h), note, small, fill=(90, 90, 90))
     if inset is not None:
         x = diff_x + w - inset.width
         iy = y + diff_legend_h + fs // 2

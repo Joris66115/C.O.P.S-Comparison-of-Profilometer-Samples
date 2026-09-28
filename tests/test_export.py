@@ -67,8 +67,27 @@ def test_region_summary():
     d[2, :5] = 4.0   # 5 % higher
     d[9] = np.nan    # excluded
     text = region_summary(d, 2.0, signed=True)
-    assert text == "27.78 % different (22.22 % lower, 5.56 % higher)"
-    assert region_summary(np.array([[1.0, 8.0]]), 5.0, signed=False) == "50.00 % different"
+    assert text == "27.78 % of the area changed by ≥ 2 µm (22.22 % lowered, 5.56 % raised)"
+    assert region_summary(np.array([[1.0, 8.0]]), 5.0, signed=False) == "50.00 % of the area changed by ΔE ≥ 5"
+
+
+def test_difference_legend_entries():
+    from profilometer_comparison.export import difference_legend
+    entries, note = difference_legend(5.0, signed=True)
+    assert [text for _, text in entries] == [
+        "lowered by ≥ 5 µm (material lost)",
+        "raised by ≥ 5 µm (material added)",
+        "changed by < 5 µm (no significant change)",
+        "no data",
+    ]
+    assert note == "Δh = height after − height before"
+    entries, note = difference_legend(5.0, signed=False)
+    assert [text for _, text in entries] == [
+        "colour changed by ΔE ≥ 5",
+        "colour changed by ΔE < 5 (after image in grey)",
+        "no data",
+    ]
+    assert note == "ΔE = colour difference between after and before (CIE76)"
 
 
 def test_upscale_for_export():

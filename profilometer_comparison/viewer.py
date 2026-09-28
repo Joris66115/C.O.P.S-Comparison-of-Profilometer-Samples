@@ -145,15 +145,7 @@ class Viewer:
         manual = " (manual)" if m["align_method"] == "manual" else ""
         lines = [f"{s.current}  ({position}){flag}{filt}    shift {m['shift_x_um']:+.1f} / "
                  f"{m['shift_y_um']:+.1f} µm{manual}    threshold {s.threshold:g} {'µm' if s.signed else 'ΔE'}"]
-        for region in ("glaze", "encrustation"):
-            p = s.percentages(region=region)
-            if p is None:
-                continue
-            if s.signed:
-                lines.append(f"{region:13s} {p['diff']:6.2f} % different   "
-                             f"({p['lower']:.2f} % lower, {p['higher']:.2f} % higher)")
-            else:
-                lines.append(f"{region:13s} {p['diff']:6.2f} % with ΔE ≥ {s.threshold:g}")
+        lines += s.region_lines()
         if m["align_warning"]:
             lines.append(f"⚠ alignment: {m['align_warning']}")
         if self.mask_mode:
@@ -495,12 +487,10 @@ class ZoomWindow:
             label.config(image=photo)
         px = self.source.pixel_um
         cx, cy = self.centre[1] * px, self.centre[0] * px
-        unit = "µm" if state.signed else "ΔE"
         field = f"{format_length(w * px)} × {format_length(h * px)}"
         self.top.title(f"{self.sample}: zoom at x {cx:.0f} µm, y {cy:.0f} µm, field of view {field}")
         self.info.config(text=f"field of view {field} ({w} × {h} px)   centre x {cx:.0f} µm, y {cy:.0f} µm\n"
-                              f"this region: {region_summary(diff, state.threshold, state.signed)}   "
-                              f"(threshold {state.threshold:g} {unit})")
+                              f"This region: {region_summary(diff, state.threshold, state.signed)}")
 
     def export(self) -> None:
         viewer, state = self.viewer, self.viewer.state
@@ -510,10 +500,11 @@ class ZoomWindow:
         images, factor = upscale_for_export(images)
         px = self.source.pixel_um
         cx, cy = self.centre[1] * px, self.centre[0] * px
-        title, info = state.export_texts(self.sample)
-        title = (f"{self.sample} · zoom at x {cx:.0f} µm, y {cy:.0f} µm, field of view "
-                 f"{format_length(diff.shape[1] * px)} · this region: "
-                 f"{region_summary(diff, state.threshold, state.signed)}\nWhole sample: {title}")
+        _, info = state.export_texts(self.sample)
+        whole = [f"Whole sample, {line[0].lower()}{line[1:]}" for line in state.region_lines(self.sample)]
+        title = "\n".join([f"{self.sample} · {state.settings.type} · zoom at x {cx:.0f} µm, y {cy:.0f} µm, "
+                           f"field of view {format_length(diff.shape[1] * px)}",
+                           f"This region: {region_summary(diff, state.threshold, state.signed)}"] + whole)
         figure = render_export(images[0], images[1], np.asarray(images[2]), um_per_px=px / factor, title=title,
                                info=info, signed=state.signed, threshold=state.threshold,
                                cmap=prepare.load_colourmap(state.settings),
