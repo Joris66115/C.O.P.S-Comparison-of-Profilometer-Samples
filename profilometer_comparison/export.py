@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 import numpy as np
@@ -16,6 +17,17 @@ BACKGROUND = (255, 255, 255)
 # Fonts with µ, ≥ and Δ, tried in order (Linux, macOS, Windows, ...); Pillow searches the system font folders.
 FONT_CANDIDATES = ("DejaVuSans.ttf", "Arial.ttf", "arial.ttf", "LiberationSans-Regular.ttf", "Helvetica.ttc")
 ASCII_FALLBACK = {"µ": "u", "≥": ">=", "Δ": "d"}
+LOCATOR_COLOUR = (255, 0, 0)
+LOCATOR_MIN_BOX = 12  # px: smaller zoom areas get a box of this size plus crosshair lines
+
+
+@dataclass
+class Locator:
+    """Overview image for the 'location of zoom' inset."""
+    image: Image.Image       # whole-sample overview (before image)
+    um_per_px: float         # size of one overview pixel
+    rect: tuple              # zoom area (x0, y0, x1, y1) in overview pixels
+    polygons: list = field(default_factory=list)  # mask outlines in overview pixels
 
 
 def scalebar_length(target_um: float) -> float:
@@ -118,6 +130,27 @@ def _draw_polygons(img: Image.Image, polygons, width: int) -> None:
         draw.line(list(poly) + [poly[0]], fill=MASK_COLOUR, width=width, joint="curve")
 
 
+def _render_locator(loc: Locator, width: int, font_size: int) -> Image.Image:
+    scale = width / loc.image.width
+    img = loc.image.convert("RGB").resize((width, max(1, round(loc.image.height * scale))), Image.BILINEAR)
+    if loc.polygons:
+        _draw_polygons(img, [[(x * scale, y * scale) for x, y in poly] for poly in loc.polygons], 2)
+    _draw_scalebar(img, loc.um_per_px / scale, font_size)
+    draw = ImageDraw.Draw(img)
+    x0, y0, x1, y1 = (v * scale for v in loc.rect)
+    if x1 - x0 < LOCATOR_MIN_BOX or y1 - y0 < LOCATOR_MIN_BOX:
+        cx, cy, half = (x0 + x1) / 2, (y0 + y1) / 2, LOCATOR_MIN_BOX / 2
+        draw.line([0, cy, cx - half - 3, cy], fill=LOCATOR_COLOUR, width=1)
+        draw.line([cx + half + 3, cy, img.width, cy], fill=LOCATOR_COLOUR, width=1)
+        draw.line([cx, 0, cx, cy - half - 3], fill=LOCATOR_COLOUR, width=1)
+        draw.line([cx, cy + half + 3, cx, img.height], fill=LOCATOR_COLOUR, width=1)
+        x0, y0, x1, y1 = cx - half, cy - half, cx + half, cy + half
+    draw.rectangle([x0 - 2, y0 - 2, x1 + 2, y1 + 2], outline=BACKGROUND, width=5)
+    draw.rectangle([x0, y0, x1, y1], outline=LOCATOR_COLOUR, width=2)
+    draw.rectangle([0, 0, img.width - 1, img.height - 1], outline=TEXT)
+    return img
+
+
 def _height_bar(cmap: Colourmap, width: int, height: int) -> tuple[Image.Image, float, float]:
     z_min = math.floor(cmap.height[0] / 10) * 10
     z_max = math.ceil(cmap.height[-1] / 10) * 10
@@ -129,11 +162,12 @@ def _height_bar(cmap: Colourmap, width: int, height: int) -> tuple[Image.Image, 
 
 def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray, um_per_px: float,
                   title: str, info: str, signed: bool, threshold: float, cmap: Colourmap | None,
-                  polygons=()) -> Image.Image:
+                  polygons=(), locator: Locator | None = None) -> Image.Image:
     """Compose the export figure.
 
     `before`, `after` and `diff_rgb` have the same size; `um_per_px` is the size of one of
-    their pixels; `polygons` are mask outlines in their pixel coordinates.
+    their pixels; `polygons` are mask outlines in their pixel coordinates. With a `locator`,
+    a small overview showing where the panels lie is added below the difference panel.
     """
     w, h = before.size
     fs = max(14, w // 45)
@@ -152,7 +186,12 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
     title_h = round(fs * 1.5) * len(title_lines) + fs // 3
     label_h, legend_h, info_h = round(fs * 1.6), round(fs * 2.2), round(fs * 1.6)
     width = 3 * w + 4 * m
-    height = m + title_h + label_h + h + m + 2 * legend_h + info_h + m
+    inset = _render_locator(locator, max(160, w // 3), max(10, fs * 2 // 3)) if locator else None
+    inset_label_h = round(fs * 1.5)
+    bottom_h = 2 * legend_h + info_h
+    if inset is not None:
+        bottom_h = max(bottom_h, inset_label_h + inset.height)
+    height = m + title_h + label_h + h + m + bottom_h + m
     out = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(out)
     font, bold, small = _font(fs), _font(round(fs * 1.15)), _font(round(fs * 0.8))
@@ -167,6 +206,11 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
         _text(draw, (x + (w - _length(draw, label, font)) / 2, y), label, font)
         out.paste(img, (x, y + label_h))
     y += label_h + h + m
+
+    if inset is not None:  # below the difference panel, right-aligned
+        x = m + 2 * (w + m) + w - inset.width
+        _text(draw, (x, y), "Location of zoom", font)
+        out.paste(inset, (x, y + inset_label_h))
 
     # Legend row 1: height colour scale (pseudo-colour only)
     if signed and cmap is not None:

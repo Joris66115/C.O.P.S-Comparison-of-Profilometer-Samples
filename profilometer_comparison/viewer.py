@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import prepare
-from .export import _draw_polygons, format_length, region_summary, render_export, upscale_for_export
+from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference
 
@@ -464,6 +464,18 @@ class ZoomWindow:
         return [[((x / px - origin[1]) * scale, (y / px - origin[0]) * scale) for x, y in poly]
                 for poly in self.masks]
 
+    def _locator(self, origin, shape) -> Locator:
+        """Whole-sample overview (cached before image) with the zoom area marked."""
+        meta, px = self.source.meta, self.source.pixel_um
+        step = meta["display_step"]
+        r0, c0 = meta["before_origin_px"]
+        overview = Image.open(self.viewer.state.cache / "pairs" / self.sample / "before.png").convert("RGB")
+        h, w = shape
+        rect = ((origin[1] - c0) / step, (origin[0] - r0) / step,
+                (origin[1] + w - c0) / step, (origin[0] + h - r0) / step)
+        polygons = [[((x / px - c0) / step, (y / px - r0) / step) for x, y in poly] for poly in self.masks]
+        return Locator(image=overview, um_per_px=px * step, rect=rect, polygons=polygons)
+
     def render(self) -> None:
         state = self.viewer.state
         before, after, diff, origin, self.centre = self.source.region(self.centre, self.size)
@@ -505,7 +517,7 @@ class ZoomWindow:
         figure = render_export(images[0], images[1], np.asarray(images[2]), um_per_px=px / factor, title=title,
                                info=info, signed=state.signed, threshold=state.threshold,
                                cmap=prepare.load_colourmap(state.settings),
-                               polygons=self._mask_pixels(origin, factor))
+                               polygons=self._mask_pixels(origin, factor), locator=self._locator(origin, diff.shape))
         name = f"{self.sample}-zoom-x{cx:.0f}um-y{cy:.0f}um-{self.size}px-{viewer._threshold_tag()}.jpg"
         viewer._save_export(figure, name)
         self.info.config(text=self.info.cget("text") + f"\nExported {name}")

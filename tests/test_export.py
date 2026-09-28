@@ -79,3 +79,22 @@ def test_upscale_for_export():
     big = Image.new("RGB", (1200, 1200))
     images, factor = upscale_for_export([big], min_px=1000)
     assert factor == 1 and images[0] is big
+
+
+def red_pixels(img):
+    arr = np.asarray(img).astype(int)
+    return int(((arr[..., 0] > 200) & (arr[..., 1] < 60) & (arr[..., 2] < 60)).sum())
+
+
+@pytest.mark.parametrize("rect", [(100, 80, 180, 140), (150, 100, 152, 102)])  # normal and tiny zoom area
+def test_render_export_with_locator(rect):
+    from profilometer_comparison.export import Locator
+    before, after, diff = panels(400, 300)
+    overview = Image.new("RGB", (320, 320), (0, 200, 255))
+    locator = Locator(image=overview, um_per_px=33.0, rect=rect, polygons=[[(10, 10), (60, 10), (60, 60)]])
+    plain = render_export(before, after, diff, um_per_px=1.35, title="M1", info="i", signed=True,
+                          threshold=2.0, cmap=default_colourmap())
+    with_map = render_export(before, after, diff, um_per_px=1.35, title="M1", info="i", signed=True,
+                             threshold=2.0, cmap=default_colourmap(), locator=locator)
+    assert with_map.width == plain.width and with_map.height >= plain.height
+    assert red_pixels(with_map) > red_pixels(plain) + 20
