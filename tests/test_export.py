@@ -98,3 +98,51 @@ def test_render_export_with_locator(rect):
                              threshold=2.0, cmap=default_colourmap(), locator=locator)
     assert with_map.width == plain.width and with_map.height >= plain.height
     assert red_pixels(with_map) > red_pixels(plain) + 20
+
+
+def colour_positions(img, colour):
+    arr = np.asarray(img)
+    ys, xs = np.nonzero((arr == np.array(colour, np.uint8)).all(axis=2))
+    return ys, xs
+
+
+def layout(w=450, h=300):
+    fs = max(14, w // 45)
+    return {"m": fs, "diff_x0": fs + 2 * (w + fs), "panels_bottom": fs * 3 + h}
+
+
+@pytest.mark.parametrize("signed, swatch", [(True, (40, 90, 220)), (False, (255, 0, 200))])
+def test_difference_legend_is_under_difference_panel(signed, swatch):
+    before, after, diff = panels(450, 300)
+    diff[:] = 225  # panel itself contains no legend colours
+    out = render_export(before, after, diff, um_per_px=10.0, title="M1", info="i", signed=signed,
+                        threshold=2.0, cmap=default_colourmap() if signed else None)
+    ys, xs = colour_positions(out, swatch)
+    assert len(xs) > 0
+    assert xs.min() >= layout()["diff_x0"] and xs.max() < out.width
+
+
+def test_mask_legend_is_left_and_legend_fits_panel_width():
+    from profilometer_comparison.export import MASK_COLOUR
+    before, after, diff = panels(450, 300)
+    diff[:] = 225
+    out = render_export(before, after, diff, um_per_px=10.0, title="M1", info="i", signed=True,
+                        threshold=2.0, cmap=default_colourmap(), polygons=[[(5, 5), (20, 5), (20, 20)]])
+    lay = layout()
+    ys, xs = colour_positions(out, MASK_COLOUR)
+    legend = ys > lay["panels_bottom"] + 40  # below the panels (outlines inside panels excluded)
+    assert legend.any() and xs[legend].max() < lay["diff_x0"]
+    ys, xs = colour_positions(out, (220, 50, 40))  # 'higher' swatch
+    assert xs.min() >= lay["diff_x0"] and xs.max() <= lay["diff_x0"] + 450
+
+
+def test_locator_is_below_difference_legend():
+    from profilometer_comparison.export import Locator
+    before, after, diff = panels(450, 300)
+    diff[:] = 225
+    locator = Locator(image=Image.new("RGB", (300, 300), (0, 200, 255)), um_per_px=30.0, rect=(100, 100, 150, 150))
+    out = render_export(before, after, diff, um_per_px=1.35, title="M1", info="i", signed=True,
+                        threshold=2.0, cmap=default_colourmap(), locator=locator)
+    legend_ys, _ = colour_positions(out, (40, 90, 220))
+    map_ys, _ = colour_positions(out, (0, 200, 255))
+    assert legend_ys.max() < map_ys.min()

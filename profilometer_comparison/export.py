@@ -182,19 +182,37 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
         _draw_scalebar(img, um_per_px, fs)
         panels.append(img)
 
+    font, bold, small = _font(fs), _font(round(fs * 1.15)), _font(round(fs * 0.8))
     title_lines = title.split("\n")
     title_h = round(fs * 1.5) * len(title_lines) + fs // 3
     label_h, legend_h, info_h = round(fs * 1.6), round(fs * 2.2), round(fs * 1.6)
     width = 3 * w + 4 * m
+
+    # Difference legend, wrapped to the width of the difference panel
+    if signed:
+        entries = [(LOWER, f"lower ≥ {threshold:g} {unit}"), (HIGHER, f"higher ≥ {threshold:g} {unit}"),
+                   (UNCHANGED, f"|Δh| < {threshold:g} {unit}"), (NO_DATA, "no data")]
+    else:
+        entries = [(MARKED, f"ΔE ≥ {threshold:g}"), ((150, 150, 150), "below threshold (after image, grey)")]
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    positions, x, row = [], 0, 0
+    for colour, text in entries:
+        item_w = round(fs * 1.4 + _length(measure, text, font))
+        if x > 0 and x + item_w > w:
+            x, row = 0, row + 1
+        positions.append((x, row, colour, text))
+        x += item_w + fs
+    row_h = round(fs * 1.6)
+    diff_legend_h = (row + 1) * row_h
+
     inset = _render_locator(locator, max(160, w // 3), max(10, fs * 2 // 3)) if locator else None
     inset_label_h = round(fs * 1.5)
-    bottom_h = 2 * legend_h + info_h
-    if inset is not None:
-        bottom_h = max(bottom_h, inset_label_h + inset.height)
+    left_h = (legend_h if signed and cmap is not None else 0) + (legend_h if polygons else 0)
+    right_h = diff_legend_h + (fs // 2 + inset_label_h + inset.height if inset is not None else 0)
+    bottom_h = max(left_h, right_h) + fs // 2 + info_h
     height = m + title_h + label_h + h + m + bottom_h + m
     out = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(out)
-    font, bold, small = _font(fs), _font(round(fs * 1.15)), _font(round(fs * 0.8))
 
     y = m
     for line in title_lines:
@@ -206,18 +224,26 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
         _text(draw, (x + (w - _length(draw, label, font)) / 2, y), label, font)
         out.paste(img, (x, y + label_h))
     y += label_h + h + m
+    bottom_y = y
 
-    if inset is not None:  # below the difference panel, right-aligned
-        x = m + 2 * (w + m) + w - inset.width
-        _text(draw, (x, y), "Location of zoom", font)
-        out.paste(inset, (x, y + inset_label_h))
+    # Under the difference panel: its colour legend, then (zoom exports) the location map
+    diff_x = m + 2 * (w + m)
+    for dx, r, colour, text in positions:
+        yy = y + r * row_h
+        draw.rectangle([diff_x + dx, yy, diff_x + dx + fs, yy + fs], fill=colour, outline=TEXT)
+        _text(draw, (diff_x + dx + fs * 1.4, yy), text, font)
+    if inset is not None:
+        x = diff_x + w - inset.width
+        iy = y + diff_legend_h + fs // 2
+        _text(draw, (x, iy), "Location of zoom", font)
+        out.paste(inset, (x, iy + inset_label_h))
 
-    # Legend row 1: height colour scale (pseudo-colour only)
+    # Under the before and after panels: height colour scale (pseudo-colour only), spanning both
     if signed and cmap is not None:
         label = "Height (µm)"
         _text(draw, (m, y), label, font)
         bar_x = m + round(_length(draw, label, font)) + fs
-        bar_w = min(w, width - bar_x - 4 * fs)
+        bar_w = m + 2 * w + m - bar_x - fs
         bar, z_min, z_max = _height_bar(cmap, bar_w, round(fs * 0.8))
         out.paste(bar, (bar_x, y))
         draw.rectangle([bar_x, y, bar_x + bar_w - 1, y + bar.height - 1], outline=TEXT)
@@ -229,23 +255,12 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
             text = f"{tick:g}"
             _text(draw, (tx - _length(draw, text, small) / 2, y + bar.height + fs // 4), text, small)
             tick += step
-    y += legend_h
+        y += legend_h
 
-    # Legend row 2: difference colours and mask outline
-    if signed:
-        entries = [(LOWER, f"lower ≥ {threshold:g} {unit}"), (HIGHER, f"higher ≥ {threshold:g} {unit}"),
-                   (UNCHANGED, f"|Δh| < {threshold:g} {unit}"), (NO_DATA, "no data")]
-    else:
-        entries = [(MARKED, f"ΔE ≥ {threshold:g}"), ((150, 150, 150), "below threshold (after image, grey)")]
-    x = m
-    for colour, text in entries:
-        draw.rectangle([x, y, x + fs, y + fs], fill=colour, outline=TEXT)
-        _text(draw, (x + fs * 1.4, y), text, font)
-        x += round(fs * 2.4 + _length(draw, text, font))
+    # Mask outlines appear on all three panels, so their legend entry stays on the left
     if polygons:
-        draw.rectangle([x, y, x + fs, y + fs], outline=MASK_COLOUR, width=max(2, fs // 6))
-        _text(draw, (x + fs * 1.4, y), "encrustation mask", font)
-    y += legend_h
+        draw.rectangle([m, y, m + fs, y + fs], outline=MASK_COLOUR, width=max(2, fs // 6))
+        _text(draw, (m + fs * 1.4, y), "encrustation mask", font)
 
-    _text(draw, (m, y), info, _font(round(fs * 0.85)), fill=(90, 90, 90))
+    _text(draw, (m, bottom_y + bottom_h - info_h), info, _font(round(fs * 0.85)), fill=(90, 90, 90))
     return out
