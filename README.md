@@ -19,7 +19,7 @@ A menu offers the three steps below, and folders are chosen with dialogs. `run.p
 Installing makes the `python -m profilometer_comparison` commands and the tests available.
 
 ```bash
-git clone https://github.com/<your-account>/profilometer-comparison.git
+git clone https://github.com/Joris66115/profilometer-comparison.git
 cd profilometer-comparison
 python3 -m venv ~/.venvs/profilometer-comparison
 ~/.venvs/profilometer-comparison/bin/pip install -e .
