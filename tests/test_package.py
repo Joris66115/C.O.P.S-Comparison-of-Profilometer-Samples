@@ -6,7 +6,12 @@ from profilometer_comparison.images import read_rgb
 
 
 def test_version():
-    assert profilometer_comparison.__version__ == "1.0.2"
+    assert profilometer_comparison.__version__ == "1.1.0"
+
+
+def test_name():
+    assert profilometer_comparison.NAME == "C.O.P.S."
+    assert profilometer_comparison.FULL_NAME == "C.O.P.S. (Comparison of Profilometer Samples)"
 
 
 def test_read_rgb_converts_to_uint8_rgb(tmp_path):

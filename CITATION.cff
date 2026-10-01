@@ -1,11 +1,12 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
-title: "profilometer-comparison"
-version: 1.0.2
-date-released: 2026-09-28
+title: "C.O.P.S. (Comparison of Profilometer Samples)"
+version: 1.1.0
+date-released: 2026-10-01
 authors:
   - family-names: Nagtegaal
     given-names: Joris
+repository-code: "https://github.com/Joris66115/COPS"
 license-url: "https://polyformproject.org/licenses/noncommercial/1.0.0"
 abstract: "Compare before/after surface profilometry exports of cultural heritage objects: alignment, height and colour difference maps per region, and a keyboard-driven viewer for flagging samples."
 keywords:

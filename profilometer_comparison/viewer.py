@@ -8,7 +8,7 @@ from tkinter import messagebox
 import numpy as np
 from PIL import Image, ImageTk
 
-from . import prepare
+from . import NAME, prepare
 from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference
@@ -37,7 +37,7 @@ class Viewer:
 
     # ---------- layout ----------
     def _build(self) -> None:
-        self.root.title(f"profilometer-comparison: {self.state.cache.name}")
+        self.root.title(f"{NAME}: {self.state.cache.name}")
         self.panels = tk.Frame(self.root)
         self.panels.pack(side=tk.TOP)
         self.canvases: dict[str, tk.Canvas] = {}

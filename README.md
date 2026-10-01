@@ -1,6 +1,6 @@
-# profilometer-comparison
+# C.O.P.S. (Comparison of Profilometer Samples)
 
-Compare **before and after** surface measurements of the same samples, exported from MarSurf MfM / MountainsMap. Developed to assess whether laser cleaning (MOPA fibre laser) of glazed ceramic tiles damages the glaze.
+C.O.P.S. compares **before and after** surface measurements of the same samples, exported from MarSurf MfM / MountainsMap. Developed to assess whether laser cleaning (MOPA fibre laser and Nd:YAG laser) of glazed ceramic tiles damages the glaze.
 
 For every sample, the tool aligns the before and after measurement, computes where and how much the surface changed, and reports the percentage of changed pixels for the **glaze** and, where you mark it, for **encrustation** separately. A keyboard-driven viewer lets you browse all samples, blink between before and after, draw encrustation masks, correct the alignment by hand, and flag samples.
 
@@ -9,23 +9,23 @@ For every sample, the tool aligns the before and after measurement, computes whe
 Requires Python 3.10 or newer with tkinter (included in the python.org installers), numpy and Pillow (`python3 -m pip install numpy Pillow`). Then, from any folder:
 
 ```bash
-python3 path/to/profilometer-comparison/run.py
+python3 path/to/COPS/run.py
 ```
 
 A menu offers the three steps below, and folders are chosen with dialogs. `run.py` also accepts all commands and options shown under Usage, for example `python3 run.py view RESULTS`.
 
 ## Installation (optional)
 
-Installing makes the `python -m profilometer_comparison` commands and the tests available.
+Installing makes the `cops` command (equivalent to `python -m profilometer_comparison`) and the tests available. The Python package inside keeps its original name, `profilometer_comparison`.
 
 ```bash
-git clone https://github.com/Joris66115/profilometer-comparison.git
-cd profilometer-comparison
-python3 -m venv ~/.venvs/profilometer-comparison
-~/.venvs/profilometer-comparison/bin/pip install -e .
+git clone https://github.com/Joris66115/COPS.git
+cd COPS
+python3 -m venv ~/.venvs/cops
+~/.venvs/cops/bin/pip install -e .
 ```
 
-The commands below use `python` for `~/.venvs/profilometer-comparison/bin/python`.
+The commands below use `python` for `~/.venvs/cops/bin/python`.
 
 **macOS tip:** keep the virtual environment **outside** folders synced by iCloud (such as Desktop and Documents). iCloud can mark files there as hidden, and Python 3.13 then skips the file that makes the package importable (`ModuleNotFoundError: No module named 'profilometer_comparison'`).
 

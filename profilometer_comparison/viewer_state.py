@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import __version__
+from . import NAME, __version__
 from .difference import percentages
 from .flags import FlagStore
 from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta
@@ -144,5 +144,5 @@ class ViewerState:
         m = self.meta(sample)
         title = f"{sample} · {m['type']} · " + "\n".join(self.region_lines(sample))
         info = (f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
-                f"file {m['file']} · profilometer-comparison {__version__} · {date.today():%Y-%m-%d}")
+                f"file {m['file']} · {NAME} {__version__} · {date.today():%Y-%m-%d}")
         return title, info

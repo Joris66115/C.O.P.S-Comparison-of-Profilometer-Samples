@@ -10,7 +10,7 @@ from profilometer_comparison.__main__ import main
 def test_version(capsys):
     with pytest.raises(SystemExit):
         main(["--version"])
-    assert __version__ in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == f"cops {__version__}"
 
 
 def test_prepare_command(tmp_path, data_dir, capsys):

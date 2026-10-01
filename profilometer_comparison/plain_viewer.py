@@ -8,6 +8,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
+from . import NAME
 from .flags import FlagStore
 from .pairing import pair_folders
 
@@ -32,7 +33,7 @@ class PlainViewer:
         self._futures: dict[int, object] = {}
         # Labels without an image measure width in characters; a blank image keeps them in pixels.
         self._blank = tk.PhotoImage(width=self.panel, height=self.panel)
-        root.title(f"profilometer-comparison: {Path(before_dir).name} vs {Path(after_dir).name}")
+        root.title(f"{NAME}: {Path(before_dir).name} vs {Path(after_dir).name}")
         frame = tk.Frame(root)
         frame.pack()
         self.labels = []

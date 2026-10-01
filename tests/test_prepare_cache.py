@@ -43,7 +43,7 @@ def test_run_prepare_writes_cache(folders, tmp_path):
     assert {"pct_diff_2", "pct_lower_2", "pct_higher_2", "align_method", "region_area_pct"} <= set(rows[0])
     assert "M9" in (cache / "prepare-log.txt").read_text()
     manifest = json.loads((cache / "manifest.json").read_text())
-    assert manifest["version"] == __version__ and manifest["settings"]["type"] == "pseudo-colour"
+    assert manifest["version"] == __version__ and manifest["tool"] == "C.O.P.S." and manifest["settings"]["type"] == "pseudo-colour"
 
 
 def test_resume_skips_done_pairs(folders, tmp_path, monkeypatch):

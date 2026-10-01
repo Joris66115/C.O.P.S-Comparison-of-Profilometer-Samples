@@ -6,7 +6,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from . import __version__
+from . import FULL_NAME, __version__
 from .colourmap import build_from_studiable, save_csv
 from .images import read_rgb
 from .prepare import TYPES, Settings, SettingsMismatch, detect_type, run_prepare
@@ -70,8 +70,8 @@ def cmd_make_colourmap(args) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="profilometer-comparison",
-                                     description="Compare before/after profilometer exports.")
+    parser = argparse.ArgumentParser(prog="cops",
+                                     description=f"{FULL_NAME}: compare before/after profilometer exports.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command", required=True)
 

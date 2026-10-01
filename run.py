@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start profilometer-comparison without installing it.
+"""Start C.O.P.S. (Comparison of Profilometer Samples) without installing it.
 
     python3 run.py              menu; folders are chosen with dialogs
     python3 run.py prepare ...  same commands and options as 'python -m profilometer_comparison'
@@ -20,7 +20,7 @@ except ImportError:
 from profilometer_comparison.__main__ import _ask_dir, main
 
 MENU = """
-profilometer-comparison
+C.O.P.S. (Comparison of Profilometer Samples)
 
   1  Prepare: align and compare a BEFORE and an AFTER folder
   2  View the results of a comparison

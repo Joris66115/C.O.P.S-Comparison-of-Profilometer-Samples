@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from . import __version__
+from . import NAME, __version__
 from .align import Alignment, downsample, estimate_shift, overlap_slices
 from .colour import delta_e76, srgb_to_lab
 from .colourmap import Colourmap, default_colourmap, load_csv, rgb_to_height
@@ -290,7 +290,7 @@ def _check_or_write_manifest(cache: Path, settings: Settings, before_dir: Path, 
                 f"{cache} was made with different {', '.join(diffs)}. "
                 "Use a new output folder (--out) or the original settings.")
         return
-    path.write_text(json.dumps({"tool": "profilometer-comparison", "version": __version__,
+    path.write_text(json.dumps({"tool": NAME, "version": __version__,
                                 "created": _now(), **current}, indent=2), encoding="utf-8")
 
 
@@ -339,7 +339,7 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
         masks.update(load_masks(masks_file))
         save_masks(cache / "masks.json", masks)
 
-    log_lines = [f"=== prepare {_now()} (profilometer-comparison {__version__})"]
+    log_lines = [f"=== prepare {_now()} ({NAME} {__version__})"]
 
     def note(message: str) -> None:
         log_lines.append(message)

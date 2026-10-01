@@ -1,3 +1,8 @@
-"""Compare before/after surface profilometry exports."""
+"""C.O.P.S. (Comparison of Profilometer Samples): compare before/after surface profilometry exports.
 
-__version__ = "1.0.2"
+The Python package keeps its original name, profilometer_comparison.
+"""
+
+__version__ = "1.1.0"
+NAME = "C.O.P.S."
+FULL_NAME = "C.O.P.S. (Comparison of Profilometer Samples)"
