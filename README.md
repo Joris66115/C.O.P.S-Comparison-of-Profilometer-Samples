@@ -9,7 +9,7 @@ For every sample, the tool aligns the before and after measurement, computes whe
 Requires Python 3.10 or newer with tkinter (included in the python.org installers), numpy and Pillow (`python3 -m pip install numpy Pillow`). Then, from any folder:
 
 ```bash
-python3 path/to/COPS/run.py
+python3 path/to/C.O.P.S-Comparison-of-Profilometer-Samples/run.py
 ```
 
 A menu offers the three steps below, and folders are chosen with dialogs. `run.py` also accepts all commands and options shown under Usage, for example `python3 run.py view RESULTS`.
@@ -19,8 +19,8 @@ A menu offers the three steps below, and folders are chosen with dialogs. `run.p
 Installing makes the `cops` command (equivalent to `python -m profilometer_comparison`) and the tests available. The Python package inside keeps its original name, `profilometer_comparison`.
 
 ```bash
-git clone https://github.com/Joris66115/COPS.git
-cd COPS
+git clone https://github.com/Joris66115/C.O.P.S-Comparison-of-Profilometer-Samples.git
+cd C.O.P.S-Comparison-of-Profilometer-Samples
 python3 -m venv ~/.venvs/cops
 ~/.venvs/cops/bin/pip install -e .
 ```
