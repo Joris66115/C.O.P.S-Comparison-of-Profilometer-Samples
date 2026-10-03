@@ -33,3 +33,30 @@ def test_make_colourmap_command(tmp_path, data_dir):
     # The test crop contains only the bar, so search from the left edge.
     assert main(["make-colourmap", str(data_dir / "colourbar.png"), "--out", str(out), "--search-from", "0"]) == 0
     assert len(out.read_text().splitlines()) > 350
+
+
+@pytest.fixture
+def state_file(tmp_path, monkeypatch):
+    from profilometer_comparison import __main__ as cli
+    path = tmp_path / "config" / "cops" / "last-folder.json"
+    monkeypatch.setattr(cli, "STATE_FILE", path)
+    return path
+
+
+def test_start_dir_is_parent_of_last_chosen_folder(tmp_path, state_file):
+    from profilometer_comparison.__main__ import _remember_folder, _start_dir
+    chosen = tmp_path / "MOPA" / "pseudo-colour-view" / "image-only"
+    chosen.mkdir(parents=True)
+    _remember_folder(chosen)
+    assert state_file.exists()
+    assert _start_dir() == chosen.parent
+
+
+def test_start_dir_falls_back_to_home(tmp_path, state_file):
+    from pathlib import Path
+    from profilometer_comparison.__main__ import _remember_folder, _start_dir
+    assert _start_dir() == Path.home()               # nothing remembered yet
+    _remember_folder(tmp_path / "gone" / "folder")    # parent does not exist
+    assert _start_dir() == Path.home()
+    state_file.write_text("not json")                 # damaged settings file
+    assert _start_dir() == Path.home()

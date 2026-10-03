@@ -12,7 +12,7 @@ Requires Python 3.10 or newer with tkinter (included in the python.org installer
 python3 path/to/C.O.P.S-Comparison-of-Profilometer-Samples/run.py
 ```
 
-A menu offers the three steps below, and folders are chosen with dialogs. `run.py` also accepts all commands and options shown under Usage, for example `python3 run.py view RESULTS`.
+A menu offers the three steps below, and folders are chosen with dialogs. Each dialog opens one level above the folder you chose last (remembered in `~/.config/cops/last-folder.json`), so neighbouring before, after and results folders are close at hand. `run.py` also accepts all commands and options shown under Usage, for example `python3 run.py view RESULTS`.
 
 ## Installation (optional)
 

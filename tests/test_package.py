@@ -6,7 +6,7 @@ from profilometer_comparison.images import read_rgb
 
 
 def test_version():
-    assert profilometer_comparison.__version__ == "1.1.0"
+    assert profilometer_comparison.__version__ == "1.1.1"
 
 
 def test_name():

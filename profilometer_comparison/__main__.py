@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import date
 from pathlib import Path
@@ -11,6 +12,28 @@ from .colourmap import build_from_studiable, save_csv
 from .images import read_rgb
 from .prepare import TYPES, Settings, SettingsMismatch, detect_type, run_prepare
 
+# Last folder chosen in a folder dialog, so the next dialog opens next to it.
+STATE_FILE = Path.home() / ".config" / "cops" / "last-folder.json"
+
+
+def _remember_folder(folder: Path) -> None:
+    try:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STATE_FILE.write_text(json.dumps({"last_folder": str(folder)}), encoding="utf-8")
+    except OSError:
+        pass  # remembering is a convenience; never fail on it
+
+
+def _start_dir() -> Path:
+    """Folder one level above the last chosen folder, or the home folder if unknown or gone."""
+    try:
+        parent = Path(json.loads(STATE_FILE.read_text(encoding="utf-8"))["last_folder"]).parent
+        if parent.is_dir():
+            return parent
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    return Path.home()
+
 
 def _ask_dir(title: str) -> Path:
     import tkinter as tk
@@ -18,10 +41,11 @@ def _ask_dir(title: str) -> Path:
 
     root = tk.Tk()
     root.withdraw()
-    path = filedialog.askdirectory(title=title)
+    path = filedialog.askdirectory(title=title, initialdir=str(_start_dir()))
     root.destroy()
     if not path:
         raise SystemExit("No folder selected.")
+    _remember_folder(Path(path))
     return Path(path)
 
 

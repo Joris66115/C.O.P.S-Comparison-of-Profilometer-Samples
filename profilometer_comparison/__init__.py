@@ -3,6 +3,6 @@
 The Python package keeps its original name, profilometer_comparison.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 NAME = "C.O.P.S."
 FULL_NAME = "C.O.P.S. (Comparison of Profilometer Samples)"
