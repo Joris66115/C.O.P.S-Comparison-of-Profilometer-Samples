@@ -1,5 +1,7 @@
 # C.O.P.S. (Comparison of Profilometer Samples)
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23010431.svg)](https://doi.org/10.5281/zenodo.23010431)
+
 C.O.P.S. compares **before and after** surface measurements of the same samples, exported from MarSurf MfM / MountainsMap. Developed to assess whether laser cleaning (MOPA fibre laser and Nd:YAG laser) of glazed ceramic tiles damages the glaze.
 
 For every sample, the tool aligns the before and after measurement, computes where and how much the surface changed, and reports the percentage of changed pixels for the **glaze** and, where you mark it, for **encrustation** separately. A keyboard-driven viewer lets you browse all samples, blink between before and after, draw encrustation masks, correct the alignment by hand, and flag samples.
@@ -168,7 +170,7 @@ The tests use small crops of real measurements in `tests/data/`.
 
 ## How to cite
 
-If you use this software, please cite it. GitHub shows the citation under "Cite this repository", generated from `CITATION.cff`. Please also cite the related paper (reference added on publication).
+If you use this software, please cite it: DOI [10.5281/zenodo.23010431](https://doi.org/10.5281/zenodo.23010431) (all versions; each release on Zenodo also has its own version DOI, which is best for citing the exact version you used). GitHub shows the full citation under "Cite this repository", generated from `CITATION.cff`. Please also cite the related paper (reference added on publication).
 
 ## Licence
 
