@@ -6,7 +6,9 @@ date-released: 2026-10-05
 authors:
   - family-names: Nagtegaal
     given-names: Joris
+    orcid: "https://orcid.org/0009-0000-0240-5704"
 repository-code: "https://github.com/Joris66115/C.O.P.S-Comparison-of-Profilometer-Samples"
+license: PolyForm-Noncommercial-1.0.0
 license-url: "https://polyformproject.org/licenses/noncommercial/1.0.0"
 abstract: "Compare before/after surface profilometry exports of cultural heritage objects: alignment, height and colour difference maps per region, and a keyboard-driven viewer for flagging samples."
 keywords:
