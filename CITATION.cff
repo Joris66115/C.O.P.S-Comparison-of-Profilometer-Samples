@@ -7,6 +7,8 @@ authors:
   - family-names: Nagtegaal
     given-names: Joris
     orcid: "https://orcid.org/0009-0000-0240-5704"
+    affiliation: "University of Amsterdam, Faculty of Humanities, Advanced Professional Program in Conservation and Restoration of Cultural Heritage (specialisation Glass and Ceramics)"
+doi: 10.5281/zenodo.23010431
 repository-code: "https://github.com/Joris66115/C.O.P.S-Comparison-of-Profilometer-Samples"
 license: PolyForm-Noncommercial-1.0.0
 license-url: "https://polyformproject.org/licenses/noncommercial/1.0.0"
