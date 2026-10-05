@@ -56,10 +56,15 @@ def phase_correlation(a: np.ndarray, b: np.ndarray, exclude: int = 5) -> tuple[i
     return int(dy), int(dx), psr
 
 
-def overlap_slices(shape_before, shape_after, dy: int, dx: int):
-    """Slices (before_slices, after_slices) of the region both images cover."""
-    y0, y1 = max(0, -dy), min(shape_before[0], shape_after[0] - dy)
-    x0, x1 = max(0, -dx), min(shape_before[1], shape_after[1] - dx)
+def overlap_slices(shape_before, shape_after, dy: int, dx: int, after_bounds=None):
+    """Slices (before_slices, after_slices) of the region both images cover.
+
+    `after_bounds` = (y0, y1, x0, x1) limits the usable part of the after image (e.g. the
+    rectangle that stays covered after rotating it); default: the whole after image.
+    """
+    ay0, ay1, ax0, ax1 = after_bounds or (0, shape_after[0], 0, shape_after[1])
+    y0, y1 = max(0, ay0 - dy), min(shape_before[0], ay1 - dy)
+    x0, x1 = max(0, ax0 - dx), min(shape_before[1], ax1 - dx)
     if y1 <= y0 or x1 <= x0:
         raise ValueError("images do not overlap at this shift")
     return (slice(y0, y1), slice(x0, x1)), (slice(y0 + dy, y1 + dy), slice(x0 + dx, x1 + dx))

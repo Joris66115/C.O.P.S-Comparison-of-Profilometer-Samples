@@ -13,7 +13,8 @@ import numpy as np
 from PIL import Image
 
 from . import NAME, __version__
-from .align import Alignment, downsample, estimate_shift, overlap_slices
+from .align import (Alignment, downsample, estimate_rotation, estimate_shift, inner_rect, overlap_slices,
+                    rotate_array)
 from .colour import delta_e76, srgb_to_lab
 from .colourmap import Colourmap, default_colourmap, load_csv, rgb_to_height
 from .crop import crop_to_frame, find_plot_frame
@@ -40,6 +41,9 @@ class Settings:
     min_overlap_pct: float = 80.0
     unstable_threshold: float | None = None
     display_max: int = 1600
+    rotation_correction: bool = True
+    max_rotation_deg: float = 5.0
+    min_rotation_deg: float = 0.01
 
     def __post_init__(self):
         if self.type not in TYPES:
@@ -107,6 +111,30 @@ def load_image(path: str | Path, settings: Settings, cmap: Colourmap | None) -> 
                   settings.scan_length_um / rgb.shape[1])
 
 
+def rotate_loaded(img: Loaded, angle_deg: float) -> Loaded:
+    """The same image rotated about its centre (counter-clockwise positive); uncovered corners become invalid."""
+    align = rotate_array(img.align, angle_deg)
+    if img.values is img.align:
+        values = align
+    else:
+        values = np.stack([rotate_array(img.values[..., c], angle_deg) for c in range(img.values.shape[-1])], -1)
+    covered = ~np.isnan(rotate_array(np.ones(img.align.shape, np.float32), angle_deg, nearest=True))
+    valid = (rotate_array(img.valid.astype(np.float32), angle_deg, nearest=True) > 0.5) & covered & ~np.isnan(align)
+    saturated = rotate_array(img.saturated.astype(np.float32), angle_deg, nearest=True) > 0.5
+    rgb = np.asarray(Image.fromarray(img.rgb).rotate(angle_deg, resample=Image.BILINEAR, fillcolor=(255, 255, 255)))
+    return Loaded(align, values, valid, saturated, rgb, img.pixel_um)
+
+
+def _rotation(before: Loaded, after: Loaded, settings: Settings, manual_rotation):
+    """(correction_deg, method, confidence) for the after image."""
+    if not settings.rotation_correction:
+        return 0.0, "off", None
+    if manual_rotation is not None:
+        return float(manual_rotation), "manual", None
+    correction, psr = estimate_rotation(before.align, after.align, settings.max_rotation_deg)
+    return correction, "auto", psr
+
+
 def difference_values(before: Loaded, after: Loaded, bs, as_, settings: Settings, enc: np.ndarray,
                       plane: Plane | None = None, plane_origin=(0, 0)):
     """Signed height difference (plane-corrected) or ΔE on the overlap; NaN where invalid."""
@@ -138,11 +166,18 @@ def _shape(sl) -> tuple[int, int]:
 
 def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | None = None,
                  polygons: list[Polygon] = (), manual: tuple[int, int] | None = None,
-                 sample: str | None = None) -> PairResult:
+                 sample: str | None = None, manual_rotation: float | None = None) -> PairResult:
     before_path, after_path = Path(before_path), Path(after_path)
     before = load_image(before_path, settings, cmap)
     after = load_image(after_path, settings, cmap)
     polygons = list(polygons)
+
+    # Rotation around Z first (the after image is turned; before stays the reference), then the shift.
+    correction, rot_method, rot_conf = _rotation(before, after, settings, manual_rotation)
+    bounds = None
+    if abs(correction) >= settings.min_rotation_deg:
+        after = rotate_loaded(after, correction)
+        bounds = inner_rect(after.align.shape, correction)
 
     def enc_mask(bs):
         if not polygons:
@@ -154,7 +189,7 @@ def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | 
     else:
         # Pass 1: all pixels. Pass 2: only pixels that did not change much and are not encrustation.
         first = estimate_shift(before.align, after.align)
-        bs, as_ = overlap_slices(before.align.shape, after.align.shape, first.dy, first.dx)
+        bs, as_ = overlap_slices(before.align.shape, after.align.shape, first.dy, first.dx, bounds)
         enc = enc_mask(bs)
         d, valid, _ = difference_values(before, after, bs, as_, settings, enc)
         with warnings.catch_warnings(), np.errstate(invalid="ignore"):
@@ -164,7 +199,7 @@ def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | 
             stable[bs] = valid & ~enc & (deviation <= settings.unstable)
         al = estimate_shift(before.align, after.align, stable=stable)
 
-    bs, as_ = overlap_slices(before.align.shape, after.align.shape, al.dy, al.dx)
+    bs, as_ = overlap_slices(before.align.shape, after.align.shape, al.dy, al.dx, bounds)
     enc = enc_mask(bs)
     d, valid, plane = difference_values(before, after, bs, as_, settings, enc)
 
@@ -182,6 +217,8 @@ def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | 
             warnings_list.append("low confidence")
         if math.hypot(al.dy, al.dx) * px > settings.max_shift_um:
             warnings_list.append("large shift")
+    if rot_method == "auto" and abs(correction) > settings.max_rotation_deg - 0.25:
+        warnings_list.append("rotation near search limit")
     if overlap_pct < settings.min_overlap_pct:
         warnings_list.append("low overlap")
 
@@ -201,6 +238,10 @@ def process_pair(before_path, after_path, settings: Settings, cmap: Colourmap | 
         "shift_x_um": round(al.dx * px, 2),
         "shift_y_um": round(al.dy * px, 2),
         "align_method": al.method,
+        "rotation_deg": round(-correction, 3) + 0.0,
+        "rotation_correction_deg": round(correction, 4) + 0.0,
+        "rotation_method": rot_method,
+        "rotation_confidence": None if rot_conf is None else round(rot_conf, 1),
         "align_confidence": None if math.isnan(al.confidence) else round(al.confidence, 1),
         "align_warning": "; ".join(warnings_list),
         "overlap_pct": round(overlap_pct, 3),
@@ -296,6 +337,7 @@ def _check_or_write_manifest(cache: Path, settings: Settings, before_dir: Path, 
 
 def summary_columns(settings: Settings) -> list[str]:
     cols = ["sample", "file", "type", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
+            "rotation_deg", "rotation_method",
             "overlap_pct", "align_confidence", "align_warning", "plane_offset_um", "plane_tilt_x", "plane_tilt_y",
             "mean_dL", "excluded_pct", "saturated_pct", "mask_changed_at"]
     for t in settings.thresholds_resolved:
@@ -366,7 +408,8 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
             continue
         m = result.meta
         warn = f"  WARNING: {m['align_warning']}" if m["align_warning"] else ""
-        note(f"[{i}/{len(pairs)}] {sample}: shift {m['shift_x_um']:+.1f}/{m['shift_y_um']:+.1f} µm{warn}")
+        note(f"[{i}/{len(pairs)}] {sample}: rotation {m['rotation_deg']:+.2f}°, "
+             f"shift {m['shift_x_um']:+.1f}/{m['shift_y_um']:+.1f} µm{warn}")
 
     for name in pairing.before_only:
         note(f"only in before folder: {name}")
@@ -378,16 +421,21 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
     return cache
 
 
-def recompute_pair(cache, sample: str, manual="keep", mask_changed: bool = False) -> None:
+def recompute_pair(cache, sample: str, manual="keep", mask_changed: bool = False, manual_rotation="keep") -> None:
+    """Recompute one pair. `manual` (shift) and `manual_rotation` (correction in degrees): "keep" keeps a
+    previous manual value, None means automatic, a value sets it by hand."""
     cache = Path(cache)
     manifest = read_manifest(cache)
     settings = Settings.from_dict(manifest["settings"])
     old = read_meta(cache, sample)
     if manual == "keep":
         manual = (old["shift_y_px"], old["shift_x_px"]) if old["align_method"] == "manual" else None
+    if manual_rotation == "keep":
+        manual_rotation = old.get("rotation_correction_deg") if old.get("rotation_method") == "manual" else None
     polygons = load_masks(cache / "masks.json").get(sample, [])
     result = process_pair(Path(manifest["before_dir"]) / old["file"], Path(manifest["after_dir"]) / old["file"],
-                          settings, load_colourmap(settings), polygons, manual=manual, sample=sample)
+                          settings, load_colourmap(settings), polygons, manual=manual, sample=sample,
+                          manual_rotation=manual_rotation)
     result.meta["mask_changed_at"] = _now() if mask_changed else old.get("mask_changed_at")
     write_pair(cache, result)
     write_summary(cache)
@@ -407,8 +455,13 @@ class ZoomSource:
         cmap = load_colourmap(self.settings)
         self.before = load_image(Path(manifest["before_dir"]) / self.meta["file"], self.settings, cmap)
         self.after = load_image(Path(manifest["after_dir"]) / self.meta["file"], self.settings, cmap)
+        correction = self.meta.get("rotation_correction_deg", 0.0)  # caches before 1.2.0 have no rotation
+        bounds = None
+        if abs(correction) >= self.settings.min_rotation_deg:
+            self.after = rotate_loaded(self.after, correction)
+            bounds = inner_rect(self.after.align.shape, correction)
         self.dy, self.dx = self.meta["shift_y_px"], self.meta["shift_x_px"]
-        self.overlap, _ = overlap_slices(self.before.align.shape, self.after.align.shape, self.dy, self.dx)
+        self.overlap, _ = overlap_slices(self.before.align.shape, self.after.align.shape, self.dy, self.dx, bounds)
         self.plane = Plane(self.meta["plane_offset_um"], self.meta["plane_tilt_x"], self.meta["plane_tilt_y"])
         self.pixel_um = self.before.pixel_um
 

@@ -107,6 +107,7 @@ def test_export_texts(state):
     title, info = state.export_texts()
     assert title.startswith("M2 · pseudo-colour · Whole surface: ")
     assert "% of the area changed by ≥ 2 µm (" in title and "% lowered, " in title and "% raised)" in title
+    assert __import__("re").search(r"rotation [+-]\d+\.\d\d° \(auto\)", info)
     assert "shift" in info and "(auto)" in info and f"C.O.P.S. {__version__}" in info
 
 

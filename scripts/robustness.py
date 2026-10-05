@@ -1,4 +1,4 @@
-"""Alignment robustness on a full-resolution real scan.
+"""Alignment robustness on a full-resolution real scan (shift with altered surface, and rotation).
 
 Shifts the scan by a known amount, replaces a growing fraction of it by a changed
 surface (patches 8 µm lower, smoothed), and reports whether the shift is recovered.
@@ -37,5 +37,23 @@ def main(path: str) -> None:
         print(f"{fraction:16.0%} | {str((al.dy, al.dx)):15s} | {'yes' if ok else 'NO':7s} | {al.confidence:.0f}")
 
 
+def rotation_table(path: str) -> None:
+    """Rotate the full scan by known angles and check that the rotation search recovers them."""
+    from profilometer_comparison.align import estimate_rotation, rotate_array
+    import time
+
+    settings = Settings(type="pseudo-colour")
+    height = load_image(path, settings, load_colourmap(settings)).align
+    m = 600
+    before = height[m:-m, m:-m]
+    print("\nrotation | recovered | error | time")
+    for angle in (0.37, -1.6, 2.5, -4.9):
+        after = rotate_array(height, angle)[m:-m, m:-m]  # the surface turned counter-clockwise by `angle`
+        t = time.time()
+        correction, _ = estimate_rotation(before, after)
+        print(f"{angle:+8.2f}° | {-correction:+8.3f}° | {abs(-correction - angle):.3f}° | {time.time() - t:.1f} s")
+
+
 if __name__ == "__main__":
     main(sys.argv[1])
+    rotation_table(sys.argv[1])

@@ -11,10 +11,12 @@ from PIL import Image, ImageTk
 from . import NAME, prepare
 from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
-from .viewer_state import ViewerState, render_difference
+from .viewer_state import ViewerState, render_difference, rotation_text
+
+ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
-        "Shift+arrows nudge (Shift+Alt: ×10)   a auto-align   e export JPG   click: zoom")
+        "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   click: zoom")
 
 
 class Viewer:
@@ -29,6 +31,7 @@ class Viewer:
         self.points: list[tuple[float, float]] = []
         self.masks_dirty = False
         self.nudge = [0, 0]
+        self.rot_nudge = 0.0  # extra rotation (degrees) previewed before it is applied
         self._nudge_job = None
         self._photos: list = []
         self._build()
@@ -73,6 +76,8 @@ class Viewer:
         r.bind("b", lambda e: self._toggle_blink())
         r.bind("m", lambda e: self._toggle_mask_mode())
         r.bind("a", lambda e: self._reset_alignment())
+        r.bind("<bracketleft>", lambda e: self._rotate(-1))
+        r.bind("<bracketright>", lambda e: self._rotate(1))
         r.bind("e", lambda e: self._export_overview())
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
@@ -107,13 +112,19 @@ class Viewer:
         step = self.meta["display_step"]
         return -self.nudge[1] / step * scale, -self.nudge[0] / step * scale
 
+    def _after_preview(self, img: Image.Image) -> Image.Image:
+        """The after image with a pending manual rotation applied (preview only)."""
+        if not self.rot_nudge:
+            return img
+        return img.rotate(self.rot_nudge, resample=Image.BILINEAR, fillcolor=(255, 255, 255))
+
     def _render_panels(self) -> None:
         s = self.state
         w, h = self.before_img.size
         size = (max(1, round(w * self.scale)), max(1, round(h * self.scale)))
         diff_rgb = render_difference(self.diff, s.threshold, s.signed, np.asarray(self.after_img))
         images = {"before": (self.before_img, Image.BILINEAR),
-                  "after": (self.after_img, Image.BILINEAR),
+                  "after": (self._after_preview(self.after_img), Image.BILINEAR),
                   "difference": (Image.fromarray(diff_rgb), Image.NEAREST)}
         self._photos = []
         for name, (img, resample) in images.items():
@@ -144,7 +155,7 @@ class Viewer:
         filt = "  [flagged only]" if s.flagged_only else ""
         manual = " (manual)" if m["align_method"] == "manual" else ""
         lines = [f"{s.current}  ({position}){flag}{filt}    shift {m['shift_x_um']:+.1f} / "
-                 f"{m['shift_y_um']:+.1f} µm{manual}    threshold {s.threshold:g} {'µm' if s.signed else 'ΔE'}"]
+                 f"{m['shift_y_um']:+.1f} µm{manual}    {rotation_text(m)}    threshold {s.threshold:g} {'µm' if s.signed else 'ΔE'}"]
         lines += s.region_lines()
         if m["align_warning"]:
             lines.append(f"⚠ alignment: {m['align_warning']}")
@@ -153,6 +164,8 @@ class Viewer:
                          "Delete remove polygon under cursor · m/Esc done")
         if self.nudge != [0, 0]:
             lines.append(f"nudge {self.nudge[1]:+d} / {self.nudge[0]:+d} px (applied after a short pause)")
+        if self.rot_nudge:
+            lines.append(f"rotate after image {self.rot_nudge:+.2f}° (applied after a short pause)")
         if extra:
             lines.append(extra)
         self.status.config(text="\n".join(lines))
@@ -225,7 +238,7 @@ class Viewer:
 
     def _render_blink(self) -> None:
         showing_after = self._blink_phase == 1
-        img = self.after_img if showing_after else self.before_img
+        img = self._after_preview(self.after_img) if showing_after else self.before_img
         scale = self.blink_size / max(img.size)
         photo = ImageTk.PhotoImage(img.resize((round(img.size[0] * scale), round(img.size[1] * scale)),
                                               Image.BILINEAR))
@@ -251,21 +264,38 @@ class Viewer:
             self.root.after_cancel(self._nudge_job)
         self._nudge_job = self.root.after(800, self._flush_nudge)
 
+    def _rotate(self, direction: int) -> None:
+        """Turn the after image by one step (+: counter-clockwise), applied after a short pause."""
+        if self.mask_mode:
+            return
+        self.rot_nudge = round(self.rot_nudge + direction * ROTATION_STEP, 4)
+        self._render_panels()
+        if self.blinking:
+            self._render_blink()
+        self._update_status()
+        if self._nudge_job:
+            self.root.after_cancel(self._nudge_job)
+        self._nudge_job = self.root.after(800, self._flush_nudge)
+
     def _flush_nudge(self) -> None:
         if self._nudge_job:
             self.root.after_cancel(self._nudge_job)
             self._nudge_job = None
-        if self.nudge == [0, 0]:
+        if self.nudge == [0, 0] and not self.rot_nudge:
             return
-        manual = (self.meta["shift_y_px"] + self.nudge[0], self.meta["shift_x_px"] + self.nudge[1])
-        self.nudge = [0, 0]
-        self._recompute(manual=manual)
+        kwargs = {}
+        if self.nudge != [0, 0]:
+            kwargs["manual"] = (self.meta["shift_y_px"] + self.nudge[0], self.meta["shift_x_px"] + self.nudge[1])
+        if self.rot_nudge:
+            kwargs["manual_rotation"] = round(self.meta.get("rotation_correction_deg", 0.0) + self.rot_nudge, 4)
+        self.nudge, self.rot_nudge = [0, 0], 0.0
+        self._recompute(**kwargs)
 
     def _reset_alignment(self) -> None:
         if self.mask_mode:
             return
-        self.nudge = [0, 0]
-        self._recompute(manual=None)
+        self.nudge, self.rot_nudge = [0, 0], 0.0
+        self._recompute(manual=None, manual_rotation=None)
 
     def _recompute(self, **kwargs) -> None:
         self._update_status("Recomputing from the full-resolution originals…")

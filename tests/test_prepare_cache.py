@@ -40,7 +40,8 @@ def test_run_prepare_writes_cache(folders, tmp_path):
         assert (cache / "pairs" / "M35" / f).exists()
     rows = read_summary(cache)
     assert [(r["sample"], r["region"]) for r in rows] == [("M2", "all"), ("M2", "glaze"), ("M35", "all"), ("M35", "glaze")]
-    assert {"pct_diff_2", "pct_lower_2", "pct_higher_2", "align_method", "region_area_pct"} <= set(rows[0])
+    assert {"pct_diff_2", "pct_lower_2", "pct_higher_2", "align_method", "region_area_pct",
+            "rotation_deg", "rotation_method"} <= set(rows[0])
     assert "M9" in (cache / "prepare-log.txt").read_text()
     manifest = json.loads((cache / "manifest.json").read_text())
     assert manifest["version"] == __version__ and manifest["tool"] == "C.O.P.S." and manifest["settings"]["type"] == "pseudo-colour"
@@ -105,3 +106,14 @@ def test_zoom_source_crops_and_clamps(folders, tmp_path):
     # a window larger than the overlap is limited to the overlap
     b, *_ = src.region((380, 380), 2400)
     assert b.shape[0] <= 768 and b.shape[1] <= 768
+
+
+def test_recompute_keeps_manual_rotation(folders, tmp_path):
+    cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
+    recompute_pair(cache, "M35", manual_rotation=0.3)
+    assert read_meta(cache, "M35")["rotation_method"] == "manual"
+    recompute_pair(cache, "M35")  # "keep"
+    meta = read_meta(cache, "M35")
+    assert meta["rotation_method"] == "manual" and meta["rotation_correction_deg"] == 0.3
+    recompute_pair(cache, "M35", manual=None, manual_rotation=None)
+    assert read_meta(cache, "M35")["rotation_method"] == "auto"

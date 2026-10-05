@@ -75,3 +75,39 @@ def test_true_colour_pair(tmp_path):
     assert r.meta["pixel_um"] == pytest.approx(10.0)
     assert percentages(r.hists["all"], 2.0, signed=False)["diff"] == 0.0
     assert r.meta["mean_dL"] == pytest.approx(0.0, abs=1e-3)
+
+
+@pytest.fixture
+def rotated_pair(tmp_path, data_dir):
+    """Same real surface; the after 'measurement' is turned 0.8 deg counter-clockwise."""
+    world = Image.open(data_dir / "pc_M35.jpg").convert("RGB")
+    before = world.crop((84, 84, 684, 684))
+    after = world.rotate(0.8, resample=Image.BILINEAR, fillcolor=(128, 128, 128)).crop((84, 84, 684, 684))
+    b, a = tmp_path / "R-pseudo-colour-image-before.png", tmp_path / "R-pseudo-colour-image-after.png"
+    before.save(b)
+    after.save(a)
+    return b, a
+
+
+def test_rotation_is_detected_and_corrected(rotated_pair, pc_settings):
+    r = process_pair(*rotated_pair, pc_settings, load_colourmap(pc_settings), sample="R")
+    assert abs(r.meta["rotation_deg"] - 0.8) < 0.05
+    assert r.meta["rotation_method"] == "auto"
+    assert r.meta["excluded_pct"] < 1.0  # cropped to the area measured in both: no empty corners
+    corrected = percentages(r.hists["all"], 5.0, signed=True)["diff"]
+    off = process_pair(*rotated_pair, Settings(type="pseudo-colour", rotation_correction=False),
+                       load_colourmap(pc_settings), sample="R")
+    assert off.meta["rotation_method"] == "off" and off.meta["rotation_deg"] == 0.0
+    assert corrected < percentages(off.hists["all"], 5.0, signed=True)["diff"]
+
+
+def test_manual_rotation(rotated_pair, pc_settings):
+    r = process_pair(*rotated_pair, pc_settings, load_colourmap(pc_settings), manual_rotation=-0.5, sample="R")
+    assert r.meta["rotation_method"] == "manual"
+    assert r.meta["rotation_correction_deg"] == -0.5 and r.meta["rotation_deg"] == 0.5
+
+
+def test_same_surface_has_no_rotation(data_dir, pc_settings):
+    r = process_pair(data_dir / "pc_M35.jpg", data_dir / "pc_M35_highres.jpg", pc_settings,
+                     load_colourmap(pc_settings), sample="M35")
+    assert abs(r.meta["rotation_deg"]) < 0.05

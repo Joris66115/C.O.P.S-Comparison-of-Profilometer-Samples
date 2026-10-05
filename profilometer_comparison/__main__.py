@@ -57,7 +57,8 @@ def cmd_prepare(args) -> int:
         raise SystemExit(f"Could not detect the image type in {before}; use --type {{{','.join(TYPES)}}}.")
     settings = Settings(type=image_type, pixel_um=args.pixel_um, scan_length_um=args.scan_length_um,
                         thresholds=tuple(args.thresholds) if args.thresholds else None,
-                        plane_correction=not args.no_plane_correction, colourmap=args.colourmap)
+                        plane_correction=not args.no_plane_correction, colourmap=args.colourmap,
+                        rotation_correction=not args.no_rotation_correction)
     out = args.out or after.parent / f"comparison-{image_type}-{date.today():%Y-%m-%d}"
     print(f"Comparing {image_type}:\n  before: {before}\n  after:  {after}\n  output: {out}")
     try:
@@ -107,6 +108,8 @@ def main(argv=None) -> int:
     p.add_argument("--masks", type=Path, help="masks.json to reuse (e.g. from another image type)")
     p.add_argument("--thresholds", type=float, nargs="+", help="thresholds for summary.csv")
     p.add_argument("--no-plane-correction", action="store_true", help="do not remove offset/tilt (height only)")
+    p.add_argument("--no-rotation-correction", action="store_true",
+                   help="do not search for and correct rotation around Z (default: search within +-5 degrees)")
     p.add_argument("--pixel-um", type=float, default=1.35, help="pseudo-colour pixel size in µm (default 1.35)")
     p.add_argument("--scan-length-um", type=float, default=10674.0,
                    help="true-colour scan width in µm (default 10674)")

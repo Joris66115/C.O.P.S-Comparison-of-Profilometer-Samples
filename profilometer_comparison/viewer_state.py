@@ -33,6 +33,11 @@ def change_sentence(p: dict, threshold: float, signed: bool) -> str:
     return f"{p['diff']:.2f} % of the area changed by ΔE ≥ {threshold:g}"
 
 
+def rotation_text(meta: dict) -> str:
+    """'rotation +0.42° (auto)': rotation of the after measurement relative to before (counter-clockwise +)."""
+    return f"rotation {meta.get('rotation_deg', 0.0):+.2f}° ({meta.get('rotation_method', 'off')})"
+
+
 def render_difference(diff: np.ndarray, threshold: float, signed: bool,
                       after_small: np.ndarray | None = None) -> np.ndarray:
     """Colour image of the difference: blue lower / red higher (height) or magenta over a grey after image (colour)."""
@@ -143,6 +148,7 @@ class ViewerState:
         sample = sample or self.current
         m = self.meta(sample)
         title = f"{sample} · {m['type']} · " + "\n".join(self.region_lines(sample))
-        info = (f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
+        info = (f"{rotation_text(m)} · "
+                f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
                 f"file {m['file']} · {NAME} {__version__} · {date.today():%Y-%m-%d}")
         return title, info

@@ -56,7 +56,7 @@ Folder dialogs ask for the before and after folders. Or give everything on the c
 python -m profilometer_comparison prepare --before BEFORE --after AFTER --out RESULTS
 ```
 
-This writes a results folder with `summary.csv` (one row per sample and region), `prepare-log.txt`, and a cache for the viewer. A full-resolution pseudo-colour pair takes about 5 s, so 120 samples take about 10 minutes. An interrupted run continues where it stopped.
+This writes a results folder with `summary.csv` (one row per sample and region), `prepare-log.txt`, and a cache for the viewer. A full-resolution pseudo-colour pair takes about 12 s (including the rotation search), so 120 samples take about 25 minutes. An interrupted run continues where it stopped. Results folders made with a version before 1.2.0 use different settings and cannot be resumed; prepare into a new folder.
 
 ### 2. View
 
@@ -73,7 +73,8 @@ python -m profilometer_comparison view RESULTS
 | b | blink between before and after |
 | m | mask mode: click points around encrustation on the BEFORE panel, Enter closes the polygon, Backspace undoes a point, Delete removes the polygon under the cursor, m or Esc finishes |
 | Shift + arrows | move the after image by 1 pixel to correct the alignment (Shift + Alt/Option: 10 pixels) |
-| a | back to automatic alignment |
+| [ / ] | turn the after image by 0.05° clockwise / counter-clockwise to correct the rotation by hand |
+| a | back to automatic alignment (shift and rotation) |
 | click | open a full-resolution zoom window at that spot |
 | e | export the current sample as a JPG figure (also in the zoom window, at full resolution) |
 
@@ -110,7 +111,7 @@ python -m profilometer_comparison view --before BEFORE --after AFTER
 
 1. **Height from pseudo-colour.** The colour scale of the export (0–350 µm) is stored as a lookup table of 393 colours, about 0.9 µm per step. Each pixel gets the height of the nearest scale colour. Pixels far from any scale colour are excluded (`excluded_pct`), and pixels at the ends of the scale are counted as saturated (`saturated_pct`). Heights are therefore quantised to about 0.9 µm, and **thresholds below about 1 µm are not meaningful**. For another scale, run `make-colourmap` on a `-studiable` export.
 2. **Colour.** sRGB is converted to CIELAB (D65) and compared as ΔE\*ab (CIE76). `mean_dL` shows a global brightness change, for example from lighting.
-3. **Alignment.** Translation only, since samples sit in a fixture. Phase correlation runs on 4× downsampled images and is then refined at full resolution. It is repeated using only pixels that did not change much and are not masked as encrustation, so cleaned areas do not pull the alignment. `align_confidence` is the peak-to-sidelobe ratio of the correlation. Unrelated surfaces give 7–8, and below 20 the sample is marked "low confidence". Alignment matters: shifting an identical surface by only 3 pixels (4 µm) already makes 3.5 % of the pixels exceed 2 µm.
+3. **Alignment.** First the **rotation around the vertical (Z) axis**, which occurs when a sample is put back into its holder slightly turned: angles from −5° to +5° are tried, coarsely (0.25° steps) on reduced images and then finely (0.05° steps, refined with a parabola), and the angle with the best phase-correlation match is used. The after image is turned back by that angle; the before image stays the reference, so encrustation masks stay valid. Only the axis-aligned rectangle measured both before and after is compared, so turned-away corners never count as change, and scale bars stay correct. The rotation (of the after measurement relative to before, counter-clockwise positive) is reported in `summary.csv` (`rotation_deg`), the viewer and every exported figure; switch it off with `--no-rotation-correction`. Then the **shift**: phase correlation runs on 4× downsampled images and is then refined at full resolution. It is repeated using only pixels that did not change much and are not masked as encrustation, so cleaned areas do not pull the alignment. `align_confidence` is the peak-to-sidelobe ratio of the correlation. Unrelated surfaces give 7–8, and below 20 the sample is marked "low confidence". Alignment matters: shifting an identical surface by only 3 pixels (4 µm) already makes 3.5 % of the pixels exceed 2 µm, and leaving a rotation of 0.6° uncorrected makes 50.7 % exceed 2 µm (18.5 % exceed 5 µm), against 0.0004 % after correction.
 4. **Offset and tilt.** Each scan is levelled on its own. A plane (offset + tilt), fitted on the glaze pixels, is therefore subtracted from the height difference. **Consequence:** a uniform loss of material over the whole field cannot be detected, only local changes. This can be switched off with `--no-plane-correction`.
 5. **Percentages.** A pixel counts as changed when |after − before| ≥ threshold. Height changes are split into *lowered* (material lost) and *raised* (material added). Percentages are calculated from full-resolution histograms (bin 0.05) of the overlap area, per region: `all`, `glaze` (outside masks) and `encrustation` (inside masks).
 
@@ -138,9 +139,20 @@ python -m profilometer_comparison view --before BEFORE --after AFTER
 
 At 2 µm the noise floor is 0.1–1.5 %; at 5 µm it is 0.01–0.02 %.
 
+**Rotation** (`scripts/robustness.py`, sample M35): the full-resolution scan was turned by known angles and the rotation search had to recover them.
+
+| Rotation | Recovered | Error | Time |
+|---|---|---|---|
+| +0.37° | +0.366° | 0.004° | 7.3 s |
+| −1.60° | −1.600° | 0.000° | 7.4 s |
+| +2.50° | +2.500° | 0.000° | 7.2 s |
+| −4.90° | −4.900° | 0.000° | 7.5 s |
+
+The rotation search adds about 7 s per sample; a full-resolution pair takes about 12 s in total.
+
 ## Limitations
 
-- Translation-only alignment; rotation is assumed negligible.
+- Alignment corrects rotation around Z (within ±5°), shift in X/Y and offset/tilt in Z; it does not correct scale differences or non-rigid distortion.
 - Heights are reconstructed from exported colours (≈ 0.9 µm steps), not read from the native measurement file.
 - Uniform material loss over the whole field is removed by the plane correction (see Method 4).
 - Encrustation masks are drawn by hand.
