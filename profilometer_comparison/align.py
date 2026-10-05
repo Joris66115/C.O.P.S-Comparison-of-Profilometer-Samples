@@ -1,7 +1,8 @@
-"""Translation-only alignment by phase correlation.
+"""Alignment by phase correlation: rotation around Z (search) and X/Y shift.
 
-Convention: a shift (dy, dx) means a feature at before[y, x] appears at
-after[y + dy, x + dx].
+Conventions: a shift (dy, dx) means a feature at before[y, x] appears at
+after[y + dy, x + dx]. Angles are in degrees, counter-clockwise positive as seen in
+the image (y pointing down), as in PIL's Image.rotate.
 """
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import warnings
 from dataclasses import dataclass
 
 import numpy as np
+from PIL import Image
 
 
 @dataclass(frozen=True)
@@ -91,3 +93,64 @@ def estimate_shift(before: np.ndarray, after: np.ndarray, stable: np.ndarray | N
     if abs(fy) <= 2 * factor and abs(fx) <= 2 * factor:
         dy, dx = dy + fy, dx + fx
     return Alignment(int(dy), int(dx), confidence)
+
+
+def rotate_array(a: np.ndarray, angle_deg: float, nearest: bool = False) -> np.ndarray:
+    """Rotate a 2-D array about its centre (same shape); pixels outside the source become NaN."""
+    a = np.asarray(a, np.float32)
+    resample = Image.NEAREST if nearest else Image.BILINEAR
+    data = np.asarray(Image.fromarray(a, mode="F").rotate(angle_deg, resample=resample, fillcolor=0.0))
+    cover = np.asarray(Image.fromarray(np.ones(a.shape, np.uint8)).rotate(angle_deg, resample=Image.NEAREST,
+                                                                           fillcolor=0))
+    return np.where(cover > 0, data, np.nan).astype(np.float32)
+
+
+def inner_rect(shape, angle_deg: float) -> tuple[int, int, int, int]:
+    """(y0, y1, x0, x1): axis-aligned rectangle fully covered after rotating an image of `shape`."""
+    h, w = shape
+    if angle_deg == 0:
+        return 0, h, 0, w
+    t = np.radians(angle_deg)
+    cx, cy = w / 2, h / 2
+
+    def turn(x, y):
+        u, v = x - cx, y - cy
+        return cx + u * np.cos(t) + v * np.sin(t), cy - u * np.sin(t) + v * np.cos(t)
+
+    (tlx, tly), (trx, try_), (blx, bly), (brx, bry) = turn(0, 0), turn(w, 0), turn(0, h), turn(w, h)
+    x0 = int(np.ceil(max(tlx, blx))) + 1
+    x1 = int(np.floor(min(trx, brx))) - 1
+    y0 = int(np.ceil(max(tly, try_))) + 1
+    y1 = int(np.floor(min(bly, bry))) - 1
+    return max(0, y0), min(h, y1), max(0, x0), min(w, x1)
+
+
+def estimate_rotation(before: np.ndarray, after: np.ndarray, max_deg: float = 5.0, coarse_step: float = 0.25,
+                      fine_step: float = 0.05, fine_span: float = 0.3) -> tuple[float, float]:
+    """Correction angle (degrees) to apply to `after` so it matches `before`, and its PSR.
+
+    Coarse search over -max_deg..+max_deg on images of about 1000 px, then a finer search
+    around the best angle at twice the resolution, refined with a parabola through the peak.
+    Both are scored by the peak-to-sidelobe ratio of the phase correlation, which responds to
+    the fine surface texture. (The plain correlation coefficient was tried for the fine step:
+    on real glaze it is dominated by the large-scale waviness and gives no clear peak.)
+    """
+    f_coarse = max(1, round(min(before.shape) / 1000))
+    f_fine = max(1, f_coarse // 2)
+
+    def scores(angles, f):
+        da, db = downsample(before, f), downsample(after, f)
+        return np.array([phase_correlation(da, rotate_array(db, a))[2] for a in angles])
+
+    coarse = np.arange(-max_deg, max_deg + 1e-9, coarse_step)
+    best = coarse[int(np.argmax(scores(coarse, f_coarse)))]
+    fine = best + np.arange(-fine_span, fine_span + 1e-9, fine_step)
+    psr = scores(fine, f_fine)
+    i = int(np.argmax(psr))
+    angle = fine[i]
+    if 0 < i < len(psr) - 1:
+        y0, y1, y2 = psr[i - 1], psr[i], psr[i + 1]
+        denom = y0 - 2 * y1 + y2
+        if denom < 0:
+            angle += fine_step * 0.5 * (y0 - y2) / denom
+    return float(np.clip(angle, -max_deg, max_deg)), float(psr[i])

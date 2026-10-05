@@ -101,3 +101,50 @@ def test_stable_mask_rescues_heavily_altered_surface(real_heights):
     stable[bs] = ~altered[as_]
     al = estimate_shift(before, after, stable=stable, window=256)
     assert (al.dy, al.dx) == (dy, dx)
+
+
+# ---------- rotation ----------
+
+def test_rotate_array_keeps_shape_and_fills_outside_with_nan():
+    from profilometer_comparison.align import rotate_array
+    a = texture((200, 300))
+    r = rotate_array(a, 3.0)
+    assert r.shape == a.shape and r.dtype == np.float32
+    assert np.isnan(r[0, 0]) and not np.isnan(r[100, 150])
+
+
+@pytest.mark.parametrize("angle", [0.5, -2.0, 4.9])
+def test_inner_rect_is_fully_covered_and_not_too_small(angle):
+    from profilometer_comparison.align import inner_rect, rotate_array
+    h, w = 400, 600
+    cover = rotate_array(np.ones((h, w), np.float32), angle, nearest=True)
+    y0, y1, x0, x1 = inner_rect((h, w), angle)
+    assert not np.isnan(cover[y0:y1, x0:x1]).any()
+    s = np.sin(np.radians(abs(angle)))
+    assert y0 <= w * s + 3 and x0 <= h * s + 3 and h - y1 <= w * s + 3 and w - x1 <= h * s + 3
+
+
+def test_inner_rect_without_rotation_is_whole_image():
+    from profilometer_comparison.align import inner_rect
+    assert inner_rect((400, 600), 0.0) == (0, 400, 0, 600)
+
+
+@pytest.mark.parametrize("angle", [0.0, 0.37, -2.4, 4.6])
+def test_estimate_rotation_synthetic(angle):
+    from profilometer_comparison.align import estimate_rotation, rotate_array
+    # fine texture (sigma 1 px), like real glaze; rotation is found from the fine detail
+    big = texture((1400, 1400), seed=4, sigma=1.0)
+    before = big[200:1200, 200:1200]
+    after = rotate_array(big, angle)[200:1200, 200:1200]  # the surface turned counter-clockwise by `angle`
+    correction, psr = estimate_rotation(before, after)
+    assert abs(correction + angle) < 0.02
+    assert psr > 20
+
+
+def test_estimate_rotation_real_surface(real_heights):
+    from profilometer_comparison.align import estimate_rotation, rotate_array
+    h = np.where(np.isnan(real_heights[0]), np.nanmean(real_heights[0]), real_heights[0])
+    before = h[104:664, 104:664]
+    after = rotate_array(h, 1.2)[104:664, 104:664]
+    correction, _ = estimate_rotation(before, after)
+    assert abs(correction + 1.2) < 0.03
