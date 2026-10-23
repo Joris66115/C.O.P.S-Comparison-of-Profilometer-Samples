@@ -120,3 +120,16 @@ def test_region_lines_without_and_with_masks(state):
     lines = state.region_lines()
     assert lines[0].startswith("Glaze (outside encrustation masks): ")
     assert lines[1].startswith("Encrustation (inside masks): ")
+
+
+def test_unmatched_samples_reported(tmp_path, data_dir):
+    before, after = tmp_path / "b", tmp_path / "a"
+    before.mkdir()
+    after.mkdir()
+    for sample in ("M1", "M7"):
+        shutil.copy(data_dir / "pc_M35.jpg", before / f"{sample}-pseudo-colour-image.jpg")
+    shutil.copy(data_dir / "pc_M35_highres.jpg", after / "M1-pseudo-colour-image.jpg")
+    cache = run_prepare(before, after, tmp_path / "c", Settings(type="pseudo-colour"), log=lambda *_: None)
+    state = ViewerState(cache)
+    assert state.unmatched == (["M7"], [])
+    assert state.unmatched_text() == "1 sample has no after measurement yet (see summary.csv)"

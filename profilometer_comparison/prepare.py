@@ -336,7 +336,7 @@ def _check_or_write_manifest(cache: Path, settings: Settings, before_dir: Path, 
 
 
 def summary_columns(settings: Settings) -> list[str]:
-    cols = ["sample", "file", "type", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
+    cols = ["sample", "file", "type", "status", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
             "rotation_deg", "rotation_method",
             "overlap_pct", "align_confidence", "align_warning", "plane_offset_um", "plane_tilt_x", "plane_tilt_y",
             "mean_dL", "excluded_pct", "saturated_pct", "mask_changed_at"]
@@ -347,25 +347,60 @@ def summary_columns(settings: Settings) -> list[str]:
     return cols
 
 
+def unmatched_samples(before_dir, after_dir, image_type: str):
+    """(sample, file) pairs found only in the before folder and only in the after folder.
+
+    Uses the same rule as the comparison: if any file carries the image-type suffix, only
+    files with that suffix count (other exports in the same folder are ignored).
+    """
+    pairing = pair_folders(before_dir, after_dir)
+    suffix = TYPES[image_type]
+    names = [p.name for p in pairing.pairs] + pairing.before_only + pairing.after_only
+    typed = any(Path(n).stem.endswith("-" + suffix) for n in names)
+
+    def keep(found):
+        return [(sample_id(n, suffix), n) for n in found if not typed or Path(n).stem.endswith("-" + suffix)]
+
+    return keep(pairing.before_only), keep(pairing.after_only)
+
+
 def write_summary(cache: Path) -> Path:
+    """summary.csv: one row per compared sample and region, plus one row per sample that has
+    only a before or only an after measurement (status column), sorted by sample."""
     cache = Path(cache)
-    settings = Settings.from_dict(read_manifest(cache)["settings"])
+    manifest = read_manifest(cache)
+    settings = Settings.from_dict(manifest["settings"])
     cols = summary_columns(settings)
+    entries = []  # (sample, rows)
+    for sample in processed_samples(cache):
+        meta, hists = read_meta(cache, sample), read_hists(cache, sample)
+        rows = []
+        for region in (r for r in REGION_ORDER if r in hists):
+            row = {**meta, "status": "compared", "region": region, "region_area_pct": meta["region_area_pct"][region]}
+            for t in settings.thresholds_resolved:
+                p = percentages(hists[region], t, settings.signed)
+                row[f"pct_diff_{t:g}"] = round(p["diff"], 4)
+                if settings.signed:
+                    row[f"pct_lower_{t:g}"] = round(p["lower"], 4)
+                    row[f"pct_higher_{t:g}"] = round(p["higher"], 4)
+            rows.append(row)
+        entries.append((sample, rows))
+    try:
+        before_only, after_only = unmatched_samples(manifest["before_dir"], manifest["after_dir"], settings.type)
+    except OSError:  # input folders moved or unavailable: list compared samples only
+        before_only, after_only = [], []
+    for found, status in ((before_only, "no after measurement"), (after_only, "no before measurement")):
+        entries += [(sample, [{"sample": sample, "file": name, "type": settings.type, "status": status}])
+                    for sample, name in found]
+    entries.sort(key=lambda e: natural_key(e[0]))
+
     path = cache / "summary.csv"
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=cols, extrasaction="ignore")
         writer.writeheader()
-        for sample in processed_samples(cache):
-            meta, hists = read_meta(cache, sample), read_hists(cache, sample)
-            for region in (r for r in REGION_ORDER if r in hists):
-                row = {**meta, "region": region, "region_area_pct": meta["region_area_pct"][region]}
-                for t in settings.thresholds_resolved:
-                    p = percentages(hists[region], t, settings.signed)
-                    row[f"pct_diff_{t:g}"] = round(p["diff"], 4)
-                    if settings.signed:
-                        row[f"pct_lower_{t:g}"] = round(p["lower"], 4)
-                        row[f"pct_higher_{t:g}"] = round(p["higher"], 4)
+        for _, rows in entries:
+            for row in rows:
                 writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
     tmp.replace(path)
     return path
@@ -411,10 +446,14 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
         note(f"[{i}/{len(pairs)}] {sample}: rotation {m['rotation_deg']:+.2f}°, "
              f"shift {m['shift_x_um']:+.1f}/{m['shift_y_um']:+.1f} µm{warn}")
 
-    for name in pairing.before_only:
-        note(f"only in before folder: {name}")
-    for name in pairing.after_only:
-        note(f"only in after folder: {name}")
+    before_only, after_only = unmatched_samples(before_dir, after_dir, settings.type)
+    for _, name in before_only:
+        note(f"only in before folder (no after measurement yet): {name}")
+    for _, name in after_only:
+        note(f"only in after folder (no before measurement): {name}")
+    if before_only or after_only:
+        note(f"{len(before_only)} sample(s) without after measurement and {len(after_only)} without "
+             "before measurement are listed in summary.csv")
     write_summary(cache)
     with open(cache / "prepare-log.txt", "a", encoding="utf-8") as fh:
         fh.write("\n".join(log_lines) + "\n")

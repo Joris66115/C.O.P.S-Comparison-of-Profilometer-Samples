@@ -60,6 +60,10 @@ python -m profilometer_comparison prepare --before BEFORE --after AFTER --out RE
 
 This writes a results folder with `summary.csv` (one row per sample and region), `prepare-log.txt`, and a cache for the viewer. A full-resolution pseudo-colour pair takes about 12 s (including the rotation search), so 120 samples take about 25 minutes. An interrupted run continues where it stopped. Results folders made with a version before 1.2.0 use different settings and cannot be resumed; prepare into a new folder.
 
+**Samples without a partner.** Only files with the same name in both folders are compared. Samples that have only a before or only an after measurement are reported at the end of the run, in `prepare-log.txt`, in the viewer, and as rows in `summary.csv` with `status` `no after measurement` or `no before measurement` (compared samples have `status` `compared`).
+
+**Measuring in batches.** You can compare the samples that are already measured and add the rest later: put the new after files in the **same** after folder and run `prepare` again with the same folders, settings and output folder. Samples that were already compared are skipped (only the new ones are calculated), masks, flags and manual corrections are kept, and `summary.csv` is rewritten with all samples.
+
 ### 2. View
 
 ```bash

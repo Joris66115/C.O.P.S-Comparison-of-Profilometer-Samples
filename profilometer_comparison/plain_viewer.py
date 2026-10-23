@@ -23,6 +23,9 @@ class PlainViewer:
         if not pairing.pairs:
             raise ValueError("no files with the same name in both folders")
         self.pairs = pairing.pairs
+        only = [f"{len(pairing.before_only)} only in before" if pairing.before_only else "",
+                f"{len(pairing.after_only)} only in after" if pairing.after_only else ""]
+        self.unmatched_note = ("   ⓘ files without a partner: " + ", ".join(o for o in only if o)) if any(only) else ""
         self.flags = FlagStore(flags_path, FIELDS)
         self.index = 0
         self.panel = max(300, min(900, (root.winfo_screenwidth() - 60) // 2))
@@ -85,7 +88,7 @@ class PlainViewer:
         pair = self.pairs[self.index]
         flag = "  ★ FLAGGED" if Path(pair.name).stem in self.flags else ""
         blink = f"  [blink: {'AFTER' if self._blink_phase else 'BEFORE'}]" if self.blinking else ""
-        self.status.config(text=f"{pair.name}  ({self.index + 1}/{len(self.pairs)}){flag}{blink}")
+        self.status.config(text=f"{pair.name}  ({self.index + 1}/{len(self.pairs)}){flag}{blink}{self.unmatched_note}")
         self._prefetch()
 
     def _go(self, step: int) -> None:

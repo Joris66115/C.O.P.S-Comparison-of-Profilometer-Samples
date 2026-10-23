@@ -157,6 +157,8 @@ class Viewer:
         lines = [f"{s.current}  ({position}){flag}{filt}    shift {m['shift_x_um']:+.1f} / "
                  f"{m['shift_y_um']:+.1f} µm{manual}    {rotation_text(m)}    threshold {s.threshold:g} {'µm' if s.signed else 'ΔE'}"]
         lines += s.region_lines()
+        if s.unmatched_text():
+            lines.append(f"ⓘ {s.unmatched_text()}")
         if m["align_warning"]:
             lines.append(f"⚠ alignment: {m['align_warning']}")
         if self.mask_mode:

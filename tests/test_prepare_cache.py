@@ -39,7 +39,10 @@ def test_run_prepare_writes_cache(folders, tmp_path):
     for f in ("before.png", "after.png", "diff.npy", "hist.npz", "meta.json"):
         assert (cache / "pairs" / "M35" / f).exists()
     rows = read_summary(cache)
-    assert [(r["sample"], r["region"]) for r in rows] == [("M2", "all"), ("M2", "glaze"), ("M35", "all"), ("M35", "glaze")]
+    assert [(r["sample"], r["region"], r["status"]) for r in rows] == [
+        ("M2", "all", "compared"), ("M2", "glaze", "compared"),
+        ("M9", "", "no after measurement"),
+        ("M35", "all", "compared"), ("M35", "glaze", "compared")]
     assert {"pct_diff_2", "pct_lower_2", "pct_higher_2", "align_method", "region_area_pct",
             "rotation_deg", "rotation_method"} <= set(rows[0])
     assert "M9" in (cache / "prepare-log.txt").read_text()
@@ -117,3 +120,36 @@ def test_recompute_keeps_manual_rotation(folders, tmp_path):
     assert meta["rotation_method"] == "manual" and meta["rotation_correction_deg"] == 0.3
     recompute_pair(cache, "M35", manual=None, manual_rotation=None)
     assert read_meta(cache, "M35")["rotation_method"] == "auto"
+
+
+def test_after_only_file_is_listed(folders, tmp_path, data_dir):
+    shutil.copy(data_dir / "pc_M35.jpg", folders[1] / NAME.format("M50"))  # after only
+    cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
+    rows = {r["sample"]: r for r in read_summary(cache) if r["region"] == ""}
+    assert rows["M50"]["status"] == "no before measurement"
+    assert rows["M50"]["file"] == NAME.format("M50")
+    assert rows["M9"]["status"] == "no after measurement"
+
+
+def test_unmatched_ignores_other_image_types(folders, tmp_path, data_dir):
+    shutil.copy(data_dir / "pc_M35.jpg", folders[0] / "M2-3D-view.png")  # other type, before only
+    cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
+    assert "M2-3D-view" not in {r["sample"] for r in read_summary(cache)}
+
+
+def test_second_batch_only_computes_new_samples(folders, tmp_path, data_dir, monkeypatch):
+    """Batch 1: only M2 and M35 measured after; batch 2 adds M9 to the same after folder."""
+    settings = Settings(type="pseudo-colour")
+    cache = run_prepare(*folders, tmp_path / "cache", settings, log=lambda *_: None)
+    shutil.copy(data_dir / "pc_M35_highres.jpg", folders[1] / NAME.format("M9"))
+    computed = []
+    original = prepare.process_pair
+
+    def counting(*args, **kwargs):
+        computed.append(kwargs.get("sample"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(prepare, "process_pair", counting)
+    run_prepare(*folders, cache, settings, log=lambda *_: None)
+    assert computed == ["M9"]
+    assert {r["sample"]: r["status"] for r in read_summary(cache)}["M9"] == "compared"

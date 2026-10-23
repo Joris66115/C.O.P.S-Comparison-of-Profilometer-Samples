@@ -10,7 +10,7 @@ import numpy as np
 from . import NAME, __version__
 from .difference import percentages
 from .flags import FlagStore
-from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta
+from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta, unmatched_samples
 
 FLAG_FIELDS = ["sample", "file", "type", "pct_diff_glaze", "threshold", "shift_x_um", "shift_y_um",
                "align_method", "flagged_at"]
@@ -66,6 +66,11 @@ class ViewerState:
         if not self.samples:
             raise ValueError(f"no processed samples in {self.cache}")
         self.flags = FlagStore(self.cache / "flagged.csv", FLAG_FIELDS)
+        try:
+            found = unmatched_samples(self.manifest["before_dir"], self.manifest["after_dir"], self.settings.type)
+            self.unmatched = ([sample for sample, _ in found[0]], [sample for sample, _ in found[1]])
+        except OSError:  # input folders moved or unavailable
+            self.unmatched = ([], [])
         self.threshold = 2.0 if self.signed else 5.0
         self.flagged_only = False
         self.current = self.samples[0]
@@ -152,3 +157,12 @@ class ViewerState:
                 f"shift {m['shift_x_um']:+.1f} / {m['shift_y_um']:+.1f} µm ({m['align_method']}) · "
                 f"file {m['file']} · {NAME} {__version__} · {date.today():%Y-%m-%d}")
         return title, info
+
+    def unmatched_text(self) -> str:
+        """e.g. '56 samples have no after measurement yet (see summary.csv)'; empty if all are paired."""
+        parts = []
+        for found, what in ((self.unmatched[0], "no after measurement yet"), (self.unmatched[1], "no before measurement")):
+            if found:
+                n = len(found)
+                parts.append(f"{n} sample{'s' if n != 1 else ''} {'have' if n != 1 else 'has'} {what}")
+        return "; ".join(parts) + " (see summary.csv)" if parts else ""
