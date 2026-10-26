@@ -18,6 +18,7 @@ from .align import (Alignment, downsample, estimate_rotation, estimate_shift, in
 from .colour import delta_e76, srgb_to_lab
 from .colourmap import Colourmap, default_colourmap, load_csv, rgb_to_height
 from .crop import crop_to_frame, find_plot_frame
+from .groups import GroupStore
 from .difference import Plane, fit_plane, histogram, percentages, subtract_plane
 from .images import read_rgb
 from .masks import Polygon, load_masks, polygons_to_mask, save_masks
@@ -336,7 +337,7 @@ def _check_or_write_manifest(cache: Path, settings: Settings, before_dir: Path, 
 
 
 def summary_columns(settings: Settings) -> list[str]:
-    cols = ["sample", "file", "type", "status", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
+    cols = ["sample", "file", "type", "group", "label", "status", "region", "region_area_pct", "shift_x_um", "shift_y_um", "align_method",
             "rotation_deg", "rotation_method",
             "overlap_pct", "align_confidence", "align_warning", "plane_offset_um", "plane_tilt_x", "plane_tilt_y",
             "mean_dL", "excluded_pct", "saturated_pct", "mask_changed_at"]
@@ -393,6 +394,11 @@ def write_summary(cache: Path) -> Path:
         entries += [(sample, [{"sample": sample, "file": name, "type": settings.type, "status": status}])
                     for sample, name in found]
     entries.sort(key=lambda e: natural_key(e[0]))
+    groups = GroupStore(cache / "groups.csv")
+    for sample, rows in entries:
+        group = groups.group_of(sample) or ("", "")
+        for row in rows:
+            row["group"], row["label"] = group
 
     path = cache / "summary.csv"
     tmp = path.with_suffix(".tmp")

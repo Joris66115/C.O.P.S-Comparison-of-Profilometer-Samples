@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
 from pathlib import Path
 from tkinter import messagebox
 
@@ -9,6 +10,7 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import NAME, prepare
+from .group_figure import export_group
 from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference, rotation_text
@@ -16,7 +18,8 @@ from .viewer_state import ViewerState, render_difference, rotation_text
 ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
-        "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   click: zoom")
+        "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   "
+        "g group   Shift+E export group   click: zoom")
 
 
 class Viewer:
@@ -34,6 +37,7 @@ class Viewer:
         self.rot_nudge = 0.0  # extra rotation (degrees) previewed before it is applied
         self._nudge_job = None
         self._photos: list = []
+        self._last_group = ""
         self._build()
         self._bind_keys()
         self.show()
@@ -79,6 +83,8 @@ class Viewer:
         r.bind("<bracketleft>", lambda e: self._rotate(-1))
         r.bind("<bracketright>", lambda e: self._rotate(1))
         r.bind("e", lambda e: self._export_overview())
+        r.bind("g", lambda e: self._group_dialog())
+        r.bind("E", lambda e: self._export_group())
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
         r.bind("<Delete>", lambda e: self._delete_polygon())
@@ -157,6 +163,8 @@ class Viewer:
         lines = [f"{s.current}  ({position}){flag}{filt}    shift {m['shift_x_um']:+.1f} / "
                  f"{m['shift_y_um']:+.1f} µm{manual}    {rotation_text(m)}    threshold {s.threshold:g} {'µm' if s.signed else 'ΔE'}"]
         lines += s.region_lines()
+        if s.group_text():
+            lines.append(s.group_text())
         if s.unmatched_text():
             lines.append(f"ⓘ {s.unmatched_text()}")
         if m["align_warning"]:
@@ -390,6 +398,68 @@ class Viewer:
         except Exception as exc:
             messagebox.showerror("Zoom failed", str(exc))
         self._update_status()
+
+    # ---------- groups ----------
+    def _group_dialog(self) -> None:
+        """Assign the current sample to a group with a free-text label (e.g. irradiation time)."""
+        if self.mask_mode:
+            return
+        s = self.state
+        sample = s.current
+        group, label = s.groups.group_of(sample) or (self._last_group, "")
+        top = tk.Toplevel(self.root)
+        top.title(f"Group for {sample}")
+        top.transient(self.root)
+        tk.Label(top, text="Group (choose one or type a new name)").grid(row=0, column=0, columnspan=3,
+                                                                         sticky="w", padx=10, pady=(10, 2))
+        group_var = tk.StringVar(value=group)
+        ttk.Combobox(top, textvariable=group_var, values=s.groups.groups(), width=34).grid(
+            row=1, column=0, columnspan=3, sticky="we", padx=10)
+        tk.Label(top, text="Label, e.g. irradiation time (1 s, 0.5 s, 12 s)").grid(row=2, column=0, columnspan=3,
+                                                                                  sticky="w", padx=10, pady=(8, 2))
+        label_var = tk.StringVar(value=label)
+        entry = tk.Entry(top, textvariable=label_var, width=36)
+        entry.grid(row=3, column=0, columnspan=3, sticky="we", padx=10)
+
+        def done(text: str) -> None:
+            prepare.write_summary(s.cache)
+            top.destroy()
+            self._update_status(text)
+
+        def save(_event=None) -> None:
+            try:
+                s.groups.assign(sample, group_var.get(), label_var.get())
+            except ValueError as exc:
+                messagebox.showwarning("Group", str(exc), parent=top)
+                return
+            self._last_group = group_var.get().strip()
+            done(f"{sample} added to group {self._last_group}")
+
+        def remove() -> None:
+            s.groups.remove(sample)
+            done(f"{sample} removed from its group")
+
+        tk.Button(top, text="Save (Enter)", command=save).grid(row=4, column=0, padx=10, pady=10, sticky="w")
+        if s.groups.group_of(sample):
+            tk.Button(top, text="Remove from group", command=remove).grid(row=4, column=1, pady=10)
+        tk.Button(top, text="Cancel (Esc)", command=top.destroy).grid(row=4, column=2, padx=10, pady=10, sticky="e")
+        top.bind("<Return>", save)
+        top.bind("<Escape>", lambda e: top.destroy())
+        entry.focus_set()
+
+    def _export_group(self) -> None:
+        found = self.state.groups.group_of(self.state.current)
+        if not found:
+            self._update_status("This sample is in no group yet: press g to add it to one.")
+            return
+        self._update_status(f"Exporting group {found[0]}…")
+        self.root.update_idletasks()
+        try:
+            path, members = export_group(self.state, found[0])
+        except Exception as exc:
+            messagebox.showerror("Group export failed", str(exc))
+            return
+        self._update_status(f"Exported {path} ({len(members)} samples: {', '.join(m for m, _ in members)})")
 
     # ---------- export ----------
     def _mask_pixels(self, origin_px, step: int) -> list:

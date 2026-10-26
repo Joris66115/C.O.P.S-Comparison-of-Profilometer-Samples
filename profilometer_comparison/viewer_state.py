@@ -10,6 +10,7 @@ import numpy as np
 from . import NAME, __version__
 from .difference import percentages
 from .flags import FlagStore
+from .groups import GroupStore
 from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta, unmatched_samples
 
 FLAG_FIELDS = ["sample", "file", "type", "pct_diff_glaze", "threshold", "shift_x_um", "shift_y_um",
@@ -66,6 +67,7 @@ class ViewerState:
         if not self.samples:
             raise ValueError(f"no processed samples in {self.cache}")
         self.flags = FlagStore(self.cache / "flagged.csv", FLAG_FIELDS)
+        self.groups = GroupStore(self.cache / "groups.csv")
         try:
             found = unmatched_samples(self.manifest["before_dir"], self.manifest["after_dir"], self.settings.type)
             self.unmatched = ([sample for sample, _ in found[0]], [sample for sample, _ in found[1]])
@@ -166,3 +168,11 @@ class ViewerState:
                 n = len(found)
                 parts.append(f"{n} sample{'s' if n != 1 else ''} {'have' if n != 1 else 'has'} {what}")
         return "; ".join(parts) + " (see summary.csv)" if parts else ""
+
+    def group_text(self, sample: str | None = None) -> str:
+        """'group: Settings A · 1 s', or empty if the sample is in no group."""
+        found = self.groups.group_of(sample or self.current)
+        if not found:
+            return ""
+        group, label = found
+        return f"group: {group}" + (f" · {label}" if label else "")

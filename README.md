@@ -83,10 +83,20 @@ python -m profilometer_comparison view RESULTS
 | a | back to automatic alignment (shift and rotation) |
 | click | open a full-resolution zoom window at that spot |
 | e | export the current sample as a JPG figure (also in the zoom window, at full resolution) |
+| g | put the sample in a group with a label, e.g. its irradiation time (see Groups below) |
+| Shift + E | export the group of the current sample as one figure |
 
 In the difference panel, **blue** means the surface was lowered by at least the threshold (material lost), **red** that it was raised by at least the threshold (material added), **grey** that it changed by less than the threshold (no significant change), and white that there is no data. Δh = height after − height before.
 
 The percentages read, for example, *"Whole surface: 3.21 % of the area changed by ≥ 5 µm (2.90 % lowered, 0.31 % raised)"*: 3.21 % of the measured area changed in height by 5 µm or more, of which 2.90 % became lower and 0.31 % higher. For samples with encrustation masks, the glaze (outside the masks) and the encrustation (inside the masks) are reported separately.
+
+### Groups
+
+Samples that differ in one setting only (for example the same laser settings at 1, 2, 5 and 10 s irradiation) can be grouped and exported together.
+
+- Press **g** on a sample, choose an existing group or type a new name, and enter a **label** such as `1 s`, `0.5 s` or `12 s`. Press **g** again to change the label, move the sample to another group, or remove it. Each sample is in at most one group.
+- Groups are stored in `RESULTS/groups.csv` (group, sample, label) and appear as `group` and `label` columns in `summary.csv`.
+- **Shift + E** exports `exports/group-<name>-<threshold>.jpg`: one column per sample, ordered by the number in the label (labels without a number last), with rows before / after / difference, a scale bar on every panel, the changed area, rotation and shift under each column, and a shared legend.
 
 ### Zoom window
 

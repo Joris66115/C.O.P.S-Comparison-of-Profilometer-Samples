@@ -266,3 +266,98 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
 
     _text(draw, (m, bottom_y + bottom_h - info_h), info, _font(round(fs * 0.85)), fill=(90, 90, 90))
     return out
+
+
+@dataclass
+class GroupColumn:
+    """One sample of a group figure: its panels (same size), labels and mask outlines in panel pixels."""
+    before: Image.Image
+    after: Image.Image
+    diff_rgb: np.ndarray
+    um_per_px: float
+    heading: str
+    lines: list
+    polygons: list = field(default_factory=list)
+
+
+def render_group_export(columns: list[GroupColumn], title: str, info: str, signed: bool, threshold: float,
+                        cmap: Colourmap | None) -> Image.Image:
+    """Samples side by side (one column each, in the given order); rows before / after / difference."""
+    pw = max(c.before.width for c in columns)
+    ph = max(c.before.height for c in columns)
+    fs = max(14, pw // 30)
+    m = fs
+    font, bold, small = _font(fs), _font(round(fs * 1.15)), _font(round(fs * 0.8))
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    row_names = ("BEFORE", "AFTER (aligned)", "DIFFERENCE")
+    lw = round(max(_length(measure, n, font) for n in row_names)) + fs
+    n = len(columns)
+    width = m + lw + n * (pw + m)
+
+    title_lines = title.split("\n")
+    title_h = round(fs * 1.5) * len(title_lines) + fs // 3
+    head_h = round(fs * 1.6)
+    line_h = round(fs * 1.35)
+    text_h = max(len(c.lines) for c in columns) * line_h + fs // 2
+    entries, note = difference_legend(threshold, signed)
+    legend_h = max(round(fs * 2.4) if signed and cmap is not None else 0, (len(entries) + 1) * line_h)
+    height = m + title_h + head_h + 3 * (ph + m) + text_h + legend_h + m + line_h + m
+    out = Image.new("RGB", (width, height), BACKGROUND)
+    draw = ImageDraw.Draw(out)
+
+    y = m
+    for line in title_lines:
+        _text(draw, (m, y), line, bold)
+        y += round(fs * 1.5)
+    y += fs // 3
+    x0 = m + lw
+    for i, c in enumerate(columns):
+        cx = x0 + i * (pw + m)
+        _text(draw, (cx + (pw - _length(draw, c.heading, bold)) / 2, y), c.heading, bold)
+    y += head_h
+
+    for r, name in enumerate(row_names):
+        ry = y + r * (ph + m)
+        _text(draw, (m, ry + ph / 2 - fs / 2), name, font)
+        for i, c in enumerate(columns):
+            img = (c.before, c.after, Image.fromarray(c.diff_rgb))[r].convert("RGB").copy()
+            if c.polygons:
+                _draw_polygons(img, c.polygons, max(2, pw // 400))
+            _draw_scalebar(img, c.um_per_px, max(10, fs * 2 // 3))
+            out.paste(img, (x0 + i * (pw + m), ry))
+    y += 3 * (ph + m)
+
+    for i, c in enumerate(columns):  # per-sample results under each column
+        for k, line in enumerate(c.lines):
+            _text(draw, (x0 + i * (pw + m), y + k * line_h), line, small if k else font)
+    y += text_h
+
+    # Legend: height scale (before/after) on the left, difference colours on the right
+    if signed and cmap is not None:
+        label = "Height (µm)"
+        _text(draw, (m, y), label, font)
+        bar_x = m + round(_length(draw, label, font)) + fs
+        bar_w = max(fs * 10, min(2 * pw, width // 2 - bar_x - fs))
+        bar, z_min, z_max = _height_bar(cmap, bar_w, round(fs * 0.8))
+        out.paste(bar, (bar_x, y))
+        draw.rectangle([bar_x, y, bar_x + bar_w - 1, y + bar.height - 1], outline=TEXT)
+        step = scalebar_length((z_max - z_min) / 5)
+        tick = math.ceil(z_min / step) * step
+        while tick <= z_max + 1e-9:
+            tx = bar_x + (tick - z_min) / (z_max - z_min) * (bar_w - 1)
+            draw.line([tx, y + bar.height, tx, y + bar.height + fs // 4], fill=TEXT)
+            text = f"{tick:g}"
+            _text(draw, (tx - _length(draw, text, small) / 2, y + bar.height + fs // 4), text, small)
+            tick += step
+    lx = max(width // 2, m + lw)
+    for k, (colour, text) in enumerate(entries):
+        yy = y + k * line_h
+        draw.rectangle([lx, yy, lx + fs, yy + fs], fill=colour, outline=TEXT)
+        _text(draw, (lx + fs * 1.4, yy), text, font)
+    _text(draw, (lx, y + len(entries) * line_h), note, small, fill=(90, 90, 90))
+    if any(c.polygons for c in columns):
+        _text(draw, (m, y + round(fs * 2.4)), "yellow outline: encrustation mask", small, fill=(90, 90, 90))
+    y += legend_h + m
+
+    _text(draw, (m, y), info, _font(round(fs * 0.85)), fill=(90, 90, 90))
+    return out
