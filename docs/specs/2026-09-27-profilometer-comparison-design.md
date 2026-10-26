@@ -59,7 +59,7 @@ sRGB → linear RGB → XYZ (D65) → CIELAB, implemented in numpy. The differen
 
 ### 3.4 Height offset and tilt correction (pseudo-colour only)
 
-Before and after scans are levelled and form-removed independently, so their absolute height reference differs. Before thresholding, the tool fits and subtracts a **plane** (offset + tilt) from the height difference, using only glaze pixels (outside the mask) in the overlap area. The fitted offset and tilt are reported. This can be switched off (`--no-plane-correction`). Consequence, stated in the README: a uniform removal of material over the whole field cannot be detected, only local changes.
+Before and after scans are levelled and form-removed independently, so their absolute height reference differs. Before thresholding, the tool fits and subtracts a **plane** (offset + tilt) from the height difference, using only glaze pixels (outside the mask) in the overlap area. The fitted offset and tilt are reported. (Since 1.3.0 the fit is robust: pixels with residuals beyond 3 × 1.4826 × MAD, at least 1 µm, of the median residual are excluded and the plane is refitted until the set is stable, so large changed areas do not bias the plane.) This can be switched off (`--no-plane-correction`). Consequence, stated in the README: a uniform removal of material over the whole field cannot be detected, only local changes.
 
 ### 3.5 Difference and percentage
 

@@ -25,8 +25,17 @@ class Plane:
     tilt_y: float = 0.0  # µm per mm
 
 
-def fit_plane(d: np.ndarray, valid: np.ndarray, pixel_um: float, step: int = 8) -> Plane:
-    """Least-squares plane through every `step`-th valid pixel."""
+def fit_plane(d: np.ndarray, valid: np.ndarray, pixel_um: float, step: int = 8,
+              k: float = 3.0, min_cutoff: float = 1.0, max_iter: int = 10) -> Plane:
+    """Robust plane through every `step`-th valid pixel.
+
+    A plain least-squares plane is pulled towards large changed areas (a lowered
+    spot drags the offset down, so the unchanged rest looks raised). So after each
+    fit, only pixels within k robust standard deviations (1.4826 * MAD, at least
+    `min_cutoff` µm because heights come in ~0.9 µm steps) of the median residual
+    are kept, and the plane is refitted until that set stops changing. The plane
+    is thus set by the unchanged surface, as long as that is the majority.
+    """
     rows, cols = np.nonzero(valid[::step, ::step])
     if rows.size < 3:
         return Plane()
@@ -34,7 +43,16 @@ def fit_plane(d: np.ndarray, valid: np.ndarray, pixel_um: float, step: int = 8) 
     y_mm = rows * step * pixel_um / 1000
     x_mm = cols * step * pixel_um / 1000
     design = np.column_stack([np.ones_like(x_mm), x_mm, y_mm])
-    coef, *_ = np.linalg.lstsq(design, z, rcond=None)
+    keep = np.ones(z.size, bool)
+    for _ in range(max_iter):
+        coef, *_ = np.linalg.lstsq(design[keep], z[keep], rcond=None)
+        res = z - design @ coef
+        centre = np.median(res[keep])
+        spread = 1.4826 * np.median(np.abs(res[keep] - centre))
+        new_keep = np.abs(res - centre) <= max(k * spread, min_cutoff)
+        if new_keep.sum() < 3 or np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
     return Plane(float(coef[0]), float(coef[1]), float(coef[2]))
 
 

@@ -60,3 +60,33 @@ def test_subtract_plane_with_origin():
     d = np.zeros((2, 2), np.float32)
     out = subtract_plane(d, plane, pixel_um=1000.0, origin_px=(0, 5))  # d[0,0] is 5 mm to the right
     np.testing.assert_allclose(out, [[-5, -6], [-5, -6]])
+
+
+def _surface(h=1200, w=1000, pixel_um=1.35, seed=0):
+    rng = np.random.default_rng(seed)
+    y_mm = np.arange(h)[:, None] * pixel_um / 1000
+    x_mm = np.arange(w)[None, :] * pixel_um / 1000
+    noise = rng.normal(0, 0.5, (h, w))
+    return (1.5 + 0.8 * x_mm - 0.4 * y_mm + noise).astype(np.float32), y_mm, x_mm
+
+
+def test_plane_fit_ignores_large_changed_area():
+    """A large lowered spot (≈30 % of the surface) must not pull the plane down."""
+    pixel_um = 1.35
+    d, _, _ = _surface(pixel_um=pixel_um)
+    yy, xx = np.mgrid[:d.shape[0], :d.shape[1]]
+    spot = (yy - 500) ** 2 + (xx - 400) ** 2 < 350 ** 2
+    d[spot] -= 40.0
+    plane = fit_plane(d, np.ones(d.shape, bool), pixel_um)
+    assert abs(plane.offset - 1.5) < 0.1
+    assert abs(plane.tilt_x - 0.8) < 0.2 and abs(plane.tilt_y + 0.4) < 0.2
+    rest = subtract_plane(d, plane, pixel_um)[~spot]
+    assert np.mean(np.abs(rest) >= 2.0) < 0.001  # unchanged glaze stays unchanged
+
+
+def test_plane_fit_on_unchanged_surface_matches_least_squares():
+    pixel_um = 1.35
+    d, _, _ = _surface(pixel_um=pixel_um, seed=1)
+    plane = fit_plane(d, np.ones(d.shape, bool), pixel_um)
+    assert abs(plane.offset - 1.5) < 0.02
+    assert abs(plane.tilt_x - 0.8) < 0.05 and abs(plane.tilt_y + 0.4) < 0.05
