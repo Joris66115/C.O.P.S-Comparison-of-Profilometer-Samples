@@ -75,6 +75,17 @@ def test_masks_file_adds_encrustation_rows(folders, tmp_path):
     assert json.loads((cache / "masks.json").read_text())["M35"]
 
 
+def test_groups_file_fills_group_columns(folders, tmp_path):
+    groups = tmp_path / "other-results" / "groups.csv"
+    groups.parent.mkdir()
+    groups.write_text("group,sample,label\nSettings A,M35,5 s\n", encoding="utf-8")
+    cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"),
+                        groups_file=groups.parent, log=lambda *_: None)
+    row = next(r for r in read_summary(cache) if r["sample"] == "M35")
+    assert (row["group"], row["label"]) == ("Settings A", "5 s")
+    assert (cache / "groups.csv").exists()
+
+
 def test_recompute_manual_and_back(folders, tmp_path):
     cache = run_prepare(*folders, tmp_path / "cache", Settings(type="pseudo-colour"), log=lambda *_: None)
     recompute_pair(cache, "M35", manual=(12, -3))

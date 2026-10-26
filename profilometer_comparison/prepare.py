@@ -412,7 +412,8 @@ def write_summary(cache: Path) -> Path:
     return path
 
 
-def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=None, log=print) -> Path:
+def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=None, groups_file=None,
+                log=print) -> Path:
     before_dir, after_dir, cache = Path(before_dir), Path(after_dir), Path(out_dir)
     cache.mkdir(parents=True, exist_ok=True)
     _check_or_write_manifest(cache, settings, before_dir, after_dir)
@@ -421,6 +422,8 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
     if masks_file:
         masks.update(load_masks(masks_file))
         save_masks(cache / "masks.json", masks)
+    if groups_file:
+        GroupStore(cache / "groups.csv").import_from(groups_file)
 
     log_lines = [f"=== prepare {_now()} ({NAME} {__version__})"]
 

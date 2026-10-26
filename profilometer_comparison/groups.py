@@ -29,6 +29,24 @@ class GroupStore:
                             "group": row["group"].strip(), "sample": row["sample"].strip(),
                             "label": (row.get("label") or "").strip()}
 
+    def import_from(self, source: str | Path) -> int:
+        """Copy the groups of another comparison (its results folder or groups.csv); returns the number of samples.
+
+        Imported groups replace this comparison's group for the same sample; other samples are left alone.
+        Samples that are not compared here (yet) are kept, so later batches are grouped automatically.
+        """
+        source = Path(source)
+        if source.is_dir():
+            source = source / "groups.csv"
+        if not source.is_file():
+            raise FileNotFoundError(f"no groups.csv found at {source}")
+        imported = GroupStore(source).rows
+        for sample, row in imported.items():
+            self.rows.pop(sample, None)
+            self.rows[sample] = dict(row)
+        self._save()
+        return len(imported)
+
     def assign(self, sample: str, group: str, label: str) -> None:
         group = group.strip()
         if not group:

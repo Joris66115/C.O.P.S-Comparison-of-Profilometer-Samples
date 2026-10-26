@@ -52,3 +52,26 @@ def test_names_are_trimmed_and_empty_group_refused(tmp_path):
     assert store.group_of("M1") == ("Settings A", "1 s")
     with pytest.raises(ValueError):
         store.assign("M2", "   ", "1 s")
+
+
+def test_import_from_other_results(tmp_path):
+    (tmp_path / "pseudo").mkdir()
+    source = GroupStore(tmp_path / "pseudo" / "groups.csv")
+    source.assign("M1", "Settings A", "1 s")
+    source.assign("M8", "Settings A", "10 s")
+    source.assign("M50", "Settings C", "2 s")  # not compared here yet: kept for later batches
+    target = GroupStore(tmp_path / "groups.csv")
+    target.assign("M1", "Old name", "x")  # imported groups win
+    target.assign("M3", "Settings B", "5 s")  # not in the import: left alone
+    assert target.import_from(tmp_path / "pseudo") == 3  # a results folder works
+    assert target.members("Settings A") == [("M1", "1 s"), ("M8", "10 s")]
+    assert target.group_of("M3") == ("Settings B", "5 s")
+    assert target.group_of("M50") == ("Settings C", "2 s")
+    assert "Old name" not in target.groups()
+    assert GroupStore(tmp_path / "groups.csv").group_of("M8") == ("Settings A", "10 s")  # saved
+    assert target.import_from(tmp_path / "pseudo" / "groups.csv") == 3  # the file itself works too
+
+
+def test_import_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        GroupStore(tmp_path / "groups.csv").import_from(tmp_path / "nowhere")

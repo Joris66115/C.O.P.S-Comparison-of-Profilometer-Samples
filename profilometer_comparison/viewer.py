@@ -4,7 +4,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import filedialog, messagebox
 
 import numpy as np
 from PIL import Image, ImageTk
@@ -19,7 +19,7 @@ ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
         "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   "
-        "g group   Shift+E export group   click: zoom")
+        "g group   Shift+G import groups   Shift+E export group   click: zoom")
 
 
 class Viewer:
@@ -85,6 +85,7 @@ class Viewer:
         r.bind("e", lambda e: self._export_overview())
         r.bind("g", lambda e: self._group_dialog())
         r.bind("E", lambda e: self._export_group())
+        r.bind("G", lambda e: self._import_groups())
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
         r.bind("<Delete>", lambda e: self._delete_polygon())
@@ -446,6 +447,23 @@ class Viewer:
         top.bind("<Return>", save)
         top.bind("<Escape>", lambda e: top.destroy())
         entry.focus_set()
+
+    def _import_groups(self) -> None:
+        """Reuse the groups of another comparison, e.g. the pseudo-colour results for a true-colour comparison."""
+        if self.mask_mode:
+            return
+        s = self.state
+        folder = filedialog.askdirectory(parent=self.root, initialdir=str(s.cache.parent),
+                                         title="Select the results folder whose groups to import")
+        if not folder:
+            return
+        try:
+            n = s.groups.import_from(folder)
+        except Exception as exc:
+            messagebox.showerror("Import groups failed", str(exc))
+            return
+        prepare.write_summary(s.cache)
+        self._update_status(f"Imported groups for {n} samples from {folder}")
 
     def _export_group(self) -> None:
         found = self.state.groups.group_of(self.state.current)

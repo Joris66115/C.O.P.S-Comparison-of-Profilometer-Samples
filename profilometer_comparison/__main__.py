@@ -62,7 +62,7 @@ def cmd_prepare(args) -> int:
     out = args.out or after.parent / f"comparison-{image_type}-{date.today():%Y-%m-%d}"
     print(f"Comparing {image_type}:\n  before: {before}\n  after:  {after}\n  output: {out}")
     try:
-        run_prepare(before, after, out, settings, masks_file=args.masks)
+        run_prepare(before, after, out, settings, masks_file=args.masks, groups_file=args.groups)
     except SettingsMismatch as exc:
         raise SystemExit(str(exc))
     script = Path(sys.argv[0])
@@ -106,6 +106,8 @@ def main(argv=None) -> int:
     p.add_argument("--type", choices=sorted(TYPES), help="image type (detected from filenames if omitted)")
     p.add_argument("--out", type=Path, help="output folder (default: next to the after folder)")
     p.add_argument("--masks", type=Path, help="masks.json to reuse (e.g. from another image type)")
+    p.add_argument("--groups", type=Path,
+                   help="groups.csv or results folder whose groups to reuse (e.g. from another image type)")
     p.add_argument("--thresholds", type=float, nargs="+", help="thresholds for summary.csv")
     p.add_argument("--no-plane-correction", action="store_true", help="do not remove offset/tilt (height only)")
     p.add_argument("--no-rotation-correction", action="store_true",
