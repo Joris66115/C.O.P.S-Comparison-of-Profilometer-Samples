@@ -53,6 +53,8 @@ def _column(state: ViewerState, sample: str, label: str, masks: dict) -> GroupCo
         heading=f"{sample} · {label}" if label else sample,
         lines=_column_lines(state, sample),
         polygons=polygons,
+        before_photo=state.photos.load(sample, "before", PANEL_MAX),
+        after_photo=state.photos.load(sample, "after", PANEL_MAX),
     )
 
 
@@ -66,7 +68,8 @@ def export_group(state: ViewerState, group: str) -> tuple[Path, list[tuple[str, 
     unit = "µm" if state.signed else "ΔE"
     title = f"Group {group} · {state.settings.type} · threshold {state.threshold:g} {unit}"
     info = f"{NAME} {__version__} · {date.today():%Y-%m-%d}"
-    figure = render_group_export(columns, title, info, state.signed, state.threshold, load_colourmap(state.settings))
+    figure = render_group_export(columns, title, info, state.signed, state.threshold, load_colourmap(state.settings),
+                                 photos=state.photos.configured)
     safe = re.sub(r"[^A-Za-z0-9]+", "-", group).strip("-") or "group"
     tag = f"{state.threshold:g}um" if state.signed else f"dE{state.threshold:g}"
     folder = state.cache / "exports"
@@ -74,3 +77,16 @@ def export_group(state: ViewerState, group: str) -> tuple[Path, list[tuple[str, 
     path = folder / f"group-{safe}-{tag}.jpg"
     figure.save(path, quality=95)
     return path, members
+
+
+def export_all_groups(state: ViewerState) -> tuple[list[tuple[str, Path]], list[tuple[str, str]]]:
+    """Export every group; returns (group, path) of the exported ones and (group, reason) of the skipped ones."""
+    done, skipped = [], []
+    for group in state.groups.groups():
+        try:
+            path, _ = export_group(state, group)
+        except ValueError as exc:
+            skipped.append((group, str(exc)))
+            continue
+        done.append((group, path))
+    return done, skipped

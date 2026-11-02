@@ -11,6 +11,7 @@ from . import NAME, __version__
 from .difference import percentages
 from .flags import FlagStore
 from .groups import GroupStore
+from .photos import PhotoStore
 from .prepare import Settings, processed_samples, read_hists, read_manifest, read_meta, unmatched_samples
 
 FLAG_FIELDS = ["sample", "file", "type", "pct_diff_glaze", "threshold", "shift_x_um", "shift_y_um",
@@ -68,6 +69,7 @@ class ViewerState:
             raise ValueError(f"no processed samples in {self.cache}")
         self.flags = FlagStore(self.cache / "flagged.csv", FLAG_FIELDS)
         self.groups = GroupStore(self.cache / "groups.csv")
+        self.photos = PhotoStore(self.cache)
         try:
             found = unmatched_samples(self.manifest["before_dir"], self.manifest["after_dir"], self.settings.type)
             self.unmatched = ([sample for sample, _ in found[0]], [sample for sample, _ in found[1]])

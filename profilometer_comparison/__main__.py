@@ -62,7 +62,8 @@ def cmd_prepare(args) -> int:
     out = args.out or after.parent / f"comparison-{image_type}-{date.today():%Y-%m-%d}"
     print(f"Comparing {image_type}:\n  before: {before}\n  after:  {after}\n  output: {out}")
     try:
-        run_prepare(before, after, out, settings, masks_file=args.masks, groups_file=args.groups)
+        run_prepare(before, after, out, settings, masks_file=args.masks, groups_file=args.groups,
+                    photo_folders=(args.photos_before, args.photos_after))
     except SettingsMismatch as exc:
         raise SystemExit(str(exc))
     script = Path(sys.argv[0])
@@ -87,6 +88,23 @@ def cmd_view(args) -> int:
     return 0
 
 
+def cmd_export_groups(args) -> int:
+    from .group_figure import export_all_groups
+    from .viewer_state import ViewerState
+
+    state = ViewerState(args.cache)
+    if args.threshold is not None:
+        state.set_threshold(args.threshold)
+    done, skipped = export_all_groups(state)
+    for group, path in done:
+        print(f"exported {group}: {path}")
+    for group, reason in skipped:
+        print(f"skipped {group}: {reason}")
+    if not done and not skipped:
+        print("No groups yet: make them in the viewer (key g) or import them (Shift+G).")
+    return 0
+
+
 def cmd_make_colourmap(args) -> int:
     cmap = build_from_studiable(read_rgb(args.image), args.z_min, args.z_max, args.search_from)
     save_csv(cmap, args.out)
@@ -108,6 +126,8 @@ def main(argv=None) -> int:
     p.add_argument("--masks", type=Path, help="masks.json to reuse (e.g. from another image type)")
     p.add_argument("--groups", type=Path,
                    help="groups.csv or results folder whose groups to reuse (e.g. from another image type)")
+    p.add_argument("--photos-before", type=Path, help="folder with photographs taken before (e.g. M1.jpg)")
+    p.add_argument("--photos-after", type=Path, help="folder with photographs taken after")
     p.add_argument("--thresholds", type=float, nargs="+", help="thresholds for summary.csv")
     p.add_argument("--no-plane-correction", action="store_true", help="do not remove offset/tilt (height only)")
     p.add_argument("--no-rotation-correction", action="store_true",
@@ -124,6 +144,12 @@ def main(argv=None) -> int:
     v.add_argument("--after", type=Path, help="plain mode: after folder")
     v.add_argument("--flags", type=Path, help="plain mode: CSV for flagged samples")
     v.set_defaults(func=cmd_view)
+
+    g = sub.add_parser("export-groups", help="export the figure of every sample group in a comparison folder")
+    g.add_argument("cache", type=Path, help="comparison folder made by 'prepare'")
+    g.add_argument("--threshold", type=float,
+                   help="threshold for the difference maps (default: the one last used in the viewer)")
+    g.set_defaults(func=cmd_export_groups)
 
     c = sub.add_parser("make-colourmap", help="build a colour map CSV from a '-studiable' export")
     c.add_argument("image", type=Path)

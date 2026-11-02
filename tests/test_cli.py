@@ -28,6 +28,29 @@ def test_prepare_command(tmp_path, data_dir, capsys):
     assert "view" in capsys.readouterr().out
 
 
+def test_prepare_photos_and_export_groups_commands(tmp_path, data_dir, capsys):
+    from PIL import Image
+    from profilometer_comparison.groups import GroupStore
+    from profilometer_comparison.photos import PhotoStore
+    before, after, photos = tmp_path / "before", tmp_path / "after", tmp_path / "photos-before"
+    for folder in (before, after, photos):
+        folder.mkdir()
+    shutil.copy(data_dir / "pc_M35.jpg", before / "M35-pseudo-colour-image.jpg")
+    shutil.copy(data_dir / "pc_M35_highres.jpg", after / "M35-pseudo-colour-image.jpg")
+    Image.new("RGB", (60, 40)).save(photos / "M35.jpg")
+    out = tmp_path / "cmp"
+    assert main(["prepare", "--before", str(before), "--after", str(after), "--out", str(out),
+                 "--photos-before", str(photos)]) == 0
+    assert PhotoStore(out).find("M35", "before").name == "M35.jpg"
+    GroupStore(out / "groups.csv").assign("M35", "Settings A", "1 s")
+    GroupStore(out / "groups.csv").assign("M99", "Settings B", "1 s")
+    capsys.readouterr()
+    assert main(["export-groups", str(out), "--threshold", "5"]) == 0
+    text = capsys.readouterr().out
+    assert (out / "exports" / "group-Settings-A-5um.jpg").exists()
+    assert "Settings B" in text and "skipped" in text
+
+
 def test_make_colourmap_command(tmp_path, data_dir):
     out = tmp_path / "cm.csv"
     # The test crop contains only the bar, so search from the left edge.

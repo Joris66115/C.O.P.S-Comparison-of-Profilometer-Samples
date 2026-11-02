@@ -10,7 +10,8 @@ import numpy as np
 from PIL import Image, ImageTk
 
 from . import NAME, prepare
-from .group_figure import export_group
+from .group_figure import export_all_groups, export_group
+from .photos import fit_photo
 from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
 from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference, rotation_text
@@ -18,14 +19,15 @@ from .viewer_state import ViewerState, render_difference, rotation_text
 ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
-        "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   "
-        "g group   Shift+G import groups   Shift+E export group   click: zoom")
+        "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   click: zoom\n"
+        "g group   Shift+G import groups   Shift+E export group   Shift+A export all groups   p photo folders")
+PHOTO_RATIO = 0.6  # height of the photo row relative to the measurement panels
 
 
 class Viewer:
     def __init__(self, root: tk.Tk, state: ViewerState):
         self.root, self.state = root, state
-        self.panel = max(300, min(700, (root.winfo_screenwidth() - 80) // 3))
+        self._set_sizes()
         self.blink_size = max(400, min(2 * self.panel, root.winfo_screenheight() - 220))
         self.blinking = False
         self._blink_job = None
@@ -43,17 +45,35 @@ class Viewer:
         self.show()
 
     # ---------- layout ----------
+    def _set_sizes(self) -> None:
+        """Panel size from the screen; with photos, the photo row must fit above the panels as well."""
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        self.panel = max(300, min(700, (sw - 80) // 3))
+        if self.state.photos.configured:
+            self.panel = max(250, min(self.panel, int((sh - 380) / (1 + PHOTO_RATIO))))
+        self.photo_h = round(self.panel * PHOTO_RATIO)
+
     def _build(self) -> None:
         self.root.title(f"{NAME}: {self.state.cache.name}")
         self.panels = tk.Frame(self.root)
         self.panels.pack(side=tk.TOP)
+        self.photo_widgets: list[tk.Widget] = []
+        self.photo_canvases: dict[str, tk.Canvas] = {}
+        for col, which in enumerate(("before", "after")):
+            label = tk.Label(self.panels, text=f"{which.upper()} PHOTO", font=("TkDefaultFont", 12, "bold"))
+            label.grid(row=0, column=col)
+            canvas = tk.Canvas(self.panels, width=self.panel, height=self.photo_h, bg="white", highlightthickness=0)
+            canvas.grid(row=1, column=col, padx=4, pady=4)
+            self.photo_canvases[which] = canvas
+            self.photo_widgets += [label, canvas]
         self.canvases: dict[str, tk.Canvas] = {}
         for col, name in enumerate(("before", "after", "difference")):
-            tk.Label(self.panels, text=name.upper(), font=("TkDefaultFont", 12, "bold")).grid(row=0, column=col)
+            tk.Label(self.panels, text=name.upper(), font=("TkDefaultFont", 12, "bold")).grid(row=2, column=col)
             canvas = tk.Canvas(self.panels, width=self.panel, height=self.panel, bg="white", highlightthickness=0)
-            canvas.grid(row=1, column=col, padx=4, pady=4)
+            canvas.grid(row=3, column=col, padx=4, pady=4)
             canvas.bind("<Button-1>", lambda e, n=name: self._on_click(n, e))
             self.canvases[name] = canvas
+        self._show_photo_row()
         self.blink_canvas = tk.Canvas(self.root, width=self.blink_size, height=self.blink_size, bg="black",
                                       highlightthickness=0)
 
@@ -67,6 +87,17 @@ class Viewer:
         self.status = tk.Label(self.root, anchor="w", justify=tk.LEFT, font=("TkFixedFont", 12))
         self.status.pack(side=tk.TOP, fill=tk.X, padx=8)
         tk.Label(self.root, anchor="w", fg="grey40", text=HELP).pack(side=tk.TOP, fill=tk.X, padx=8, pady=(0, 6))
+
+    def _show_photo_row(self) -> None:
+        for widget in self.photo_widgets:
+            if self.state.photos.configured:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        for canvas in self.photo_canvases.values():
+            canvas.config(width=self.panel, height=self.photo_h)
+        for canvas in self.canvases.values():
+            canvas.config(width=self.panel, height=self.panel)
 
     def _bind_keys(self) -> None:
         r = self.root
@@ -86,6 +117,8 @@ class Viewer:
         r.bind("g", lambda e: self._group_dialog())
         r.bind("E", lambda e: self._export_group())
         r.bind("G", lambda e: self._import_groups())
+        r.bind("A", lambda e: self._export_all_groups())
+        r.bind("p", lambda e: self._photo_folders())
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
         r.bind("<Delete>", lambda e: self._delete_polygon())
@@ -111,6 +144,7 @@ class Viewer:
         self.scale = self.panel / max(self.before_img.size)
         self.masks = load_masks(s.cache / "masks.json").get(s.current, [])
         self._render_panels()
+        self._render_photos()
         if self.blinking:
             self._render_blink()
         self._update_status()
@@ -142,6 +176,36 @@ class Viewer:
             ox, oy = self._nudge_offset(self.scale) if name == "after" else (0, 0)
             canvas.create_image(ox, oy, image=photo, anchor="nw")
             self._draw_polygons(canvas)
+
+    def _render_photos(self) -> None:
+        store, sample = self.state.photos, self.state.current
+        self._photo_refs = []
+        if not store.configured:
+            return
+        for which, canvas in self.photo_canvases.items():
+            canvas.delete("all")
+            try:
+                img = store.load(sample, which, max(self.panel, self.photo_h) * 2)
+            except OSError as exc:
+                img, missing = None, f"cannot read the photo: {exc}"
+            else:
+                missing = (f"no {which} photo for {sample}" if store.folders[which]
+                           else f"no {which}-photo folder chosen (press p)")
+            if img is None:
+                canvas.create_text(self.panel / 2, self.photo_h / 2, text=missing, fill="grey40",
+                                   width=self.panel - 20)
+                continue
+            img = fit_photo(img, self.panel, self.photo_h)
+            photo = ImageTk.PhotoImage(img)
+            self._photo_refs.append(photo)
+            canvas.create_image(self.panel / 2, self.photo_h / 2, image=photo, anchor="center")
+
+    def _export_photos(self, sample: str) -> tuple | None:
+        """(before photo, after photo) for an export, or None if no photo folders are chosen."""
+        store = self.state.photos
+        if not store.configured:
+            return None
+        return tuple(store.load(sample, which, 1500) for which in ("before", "after"))
 
     def _draw_polygons(self, canvas: tk.Canvas) -> None:
         for poly in self.masks:
@@ -465,6 +529,48 @@ class Viewer:
         prepare.write_summary(s.cache)
         self._update_status(f"Imported groups for {n} samples from {folder}")
 
+    def _photo_folders(self) -> None:
+        """Choose the folders with the photographs taken before and after (Cancel keeps the current folder)."""
+        if self.mask_mode:
+            return
+        store = self.state.photos
+        chosen = []
+        for which in ("before", "after"):
+            current = store.folders[which]
+            start = current.parent if current else self.state.cache.parent
+            folder = filedialog.askdirectory(parent=self.root, initialdir=str(start),
+                                             title=f"Select the folder with the {which.upper()} photos "
+                                                   f"(Cancel: keep {current.name if current else 'none'})")
+            chosen.append(folder or None)
+        if not any(chosen):
+            return
+        store.set_folders(*chosen)
+        self._set_sizes()
+        self._show_photo_row()
+        self.show()
+        found = sum(store.find(s, "before") is not None for s in self.state.samples), \
+            sum(store.find(s, "after") is not None for s in self.state.samples)
+        self._update_status(f"Photos found for {found[0]} (before) and {found[1]} (after) "
+                            f"of {len(self.state.samples)} samples")
+
+    def _export_all_groups(self) -> None:
+        if self.mask_mode:
+            return
+        if not self.state.groups.groups():
+            self._update_status("No groups yet: press g to put a sample in a group, or Shift+G to import groups.")
+            return
+        self._update_status("Exporting all groups…")
+        self.root.update_idletasks()
+        try:
+            done, skipped = export_all_groups(self.state)
+        except Exception as exc:
+            messagebox.showerror("Group export failed", str(exc))
+            return
+        text = f"Exported {len(done)} group figure(s) to {self.state.cache / 'exports'}"
+        if skipped:
+            text += f"; skipped (no compared samples): {', '.join(g for g, _ in skipped)}"
+        self._update_status(text)
+
     def _export_group(self) -> None:
         found = self.state.groups.group_of(self.state.current)
         if not found:
@@ -506,7 +612,8 @@ class Viewer:
             self.before_img, self.after_img,
             render_difference(self.diff, s.threshold, s.signed, np.asarray(self.after_img)),
             um_per_px=m["pixel_um"] * step, title=title, info=info, signed=s.signed, threshold=s.threshold,
-            cmap=prepare.load_colourmap(s.settings), polygons=self._mask_pixels(m["before_origin_px"], step))
+            cmap=prepare.load_colourmap(s.settings), polygons=self._mask_pixels(m["before_origin_px"], step),
+            photos=self._export_photos(s.current))
         self._save_export(figure, f"{s.current}-overview-{self._threshold_tag()}.jpg")
 
     def _quit(self) -> None:
@@ -628,7 +735,8 @@ class ZoomWindow:
         figure = render_export(images[0], images[1], np.asarray(images[2]), um_per_px=px / factor, title=title,
                                info=info, signed=state.signed, threshold=state.threshold,
                                cmap=prepare.load_colourmap(state.settings),
-                               polygons=self._mask_pixels(origin, factor), locator=self._locator(origin, diff.shape))
+                               polygons=self._mask_pixels(origin, factor), locator=self._locator(origin, diff.shape),
+                               photos=viewer._export_photos(self.sample))
         name = f"{self.sample}-zoom-x{cx:.0f}um-y{cy:.0f}um-{self.size}px-{viewer._threshold_tag()}.jpg"
         viewer._save_export(figure, name)
         self.info.config(text=self.info.cget("text") + f"\nExported {name}")

@@ -9,6 +9,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from .colourmap import Colourmap
+from .photos import fit_photo
 from .viewer_state import HIGHER, LOWER, MARKED, NO_DATA, UNCHANGED, change_sentence
 
 GREY_AFTER = (150, 150, 150)  # legend swatch for 'after image shown in grey' (true-colour)
@@ -21,6 +22,7 @@ FONT_CANDIDATES = ("DejaVuSans.ttf", "Arial.ttf", "arial.ttf", "LiberationSans-R
 ASCII_FALLBACK = {"µ": "u", "≥": ">=", "Δ": "d"}
 LOCATOR_COLOUR = (255, 0, 0)
 LOCATOR_MIN_BOX = 12  # px: smaller zoom areas get a box of this size plus crosshair lines
+NO_PHOTO = (235, 235, 235)
 
 
 @dataclass
@@ -165,6 +167,25 @@ def _render_locator(loc: Locator, width: int, font_size: int) -> Image.Image:
     return img
 
 
+def _photo_row_height(photos, w: int, h: int) -> int:
+    """Height of a photo row whose photos are fitted within w × h (3:4 of w if there is no photo)."""
+    heights = [fit_photo(p, w, h).height for p in photos if p is not None]
+    return max(heights) if heights else round(w * 0.75)
+
+
+def _paste_photo(out: Image.Image, photo: Image.Image | None, x: int, y: int, w: int, row_h: int, fs: int) -> None:
+    """Photo centred in a w × row_h cell, or a grey 'no photo' cell."""
+    draw = ImageDraw.Draw(out)
+    if photo is None:
+        draw.rectangle([x, y, x + w - 1, y + row_h - 1], fill=NO_PHOTO)
+        font = _font(fs)
+        text = "no photo"
+        _text(draw, (x + (w - _length(draw, text, font)) / 2, y + row_h / 2 - fs / 2), text, font, fill=(90, 90, 90))
+        return
+    img = fit_photo(photo, w, row_h)
+    out.paste(img, (x + (w - img.width) // 2, y + (row_h - img.height) // 2))
+
+
 def _height_bar(cmap: Colourmap, width: int, height: int) -> tuple[Image.Image, float, float]:
     z_min = math.floor(cmap.height[0] / 10) * 10
     z_max = math.ceil(cmap.height[-1] / 10) * 10
@@ -176,12 +197,14 @@ def _height_bar(cmap: Colourmap, width: int, height: int) -> tuple[Image.Image, 
 
 def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray, um_per_px: float,
                   title: str, info: str, signed: bool, threshold: float, cmap: Colourmap | None,
-                  polygons=(), locator: Locator | None = None) -> Image.Image:
+                  polygons=(), locator: Locator | None = None, photos: tuple | None = None) -> Image.Image:
     """Compose the export figure.
 
     `before`, `after` and `diff_rgb` have the same size; `um_per_px` is the size of one of
     their pixels; `polygons` are mask outlines in their pixel coordinates. With a `locator`,
     a small overview showing where the panels lie is added below the difference panel.
+    With `photos` (before photo, after photo; either may be None), a row of photographs is
+    added above the before and after panels.
     """
     w, h = before.size
     fs = max(14, w // 45)
@@ -211,7 +234,9 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
     left_h = (legend_h if signed and cmap is not None else 0) + (legend_h if polygons else 0)
     right_h = diff_legend_h + (fs // 2 + inset_label_h + inset.height if inset is not None else 0)
     bottom_h = max(left_h, right_h) + fs // 2 + info_h
-    height = m + title_h + label_h + h + m + bottom_h + m
+    photo_h = _photo_row_height(photos, w, h) if photos is not None else 0
+    photo_block = label_h + photo_h + m if photos is not None else 0
+    height = m + title_h + photo_block + label_h + h + m + bottom_h + m
     out = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(out)
 
@@ -220,6 +245,12 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
         _text(draw, (m, y), line, bold)
         y += round(fs * 1.5)
     y += fs // 3
+    if photos is not None:
+        for i, (label, photo) in enumerate(zip(("BEFORE PHOTO", "AFTER PHOTO"), photos)):
+            x = m + i * (w + m)
+            _text(draw, (x + (w - _length(draw, label, font)) / 2, y), label, font)
+            _paste_photo(out, photo, x, y + label_h, w, photo_h, fs)
+        y += photo_block
     for i, (label, img) in enumerate(zip(("BEFORE", "AFTER (aligned)", "DIFFERENCE"), panels)):
         x = m + i * (w + m)
         _text(draw, (x + (w - _length(draw, label, font)) / 2, y), label, font)
@@ -278,18 +309,31 @@ class GroupColumn:
     heading: str
     lines: list
     polygons: list = field(default_factory=list)
+    before_photo: Image.Image | None = None
+    after_photo: Image.Image | None = None
 
 
 def render_group_export(columns: list[GroupColumn], title: str, info: str, signed: bool, threshold: float,
-                        cmap: Colourmap | None) -> Image.Image:
-    """Samples side by side (one column each, in the given order); rows before / after / difference."""
+                        cmap: Colourmap | None, photos: bool = False) -> Image.Image:
+    """Samples side by side (one column each, in the given order); rows before / after / difference.
+
+    With `photos`, each measurement row is preceded by a row with the photograph taken at the same time.
+    """
     pw = max(c.before.width for c in columns)
     ph = max(c.before.height for c in columns)
     fs = max(14, pw // 30)
     m = fs
     font, bold, small = _font(fs), _font(round(fs * 1.15)), _font(round(fs * 0.8))
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    row_names = ("BEFORE", "AFTER (aligned)", "DIFFERENCE")
+    # (name, height, panel of a column): photo rows return the photo itself (or None)
+    rows = [("BEFORE", ph, lambda c: c.before), ("AFTER (aligned)", ph, lambda c: c.after),
+            ("DIFFERENCE", ph, lambda c: Image.fromarray(c.diff_rgb))]
+    if photos:
+        rows.insert(0, ("BEFORE PHOTO", _photo_row_height([c.before_photo for c in columns], pw, ph),
+                        lambda c: c.before_photo))
+        rows.insert(2, ("AFTER PHOTO", _photo_row_height([c.after_photo for c in columns], pw, ph),
+                        lambda c: c.after_photo))
+    row_names = [name for name, _, _ in rows]
     lw = round(max(_length(measure, n, font) for n in row_names)) + fs
     n = len(columns)
     width = m + lw + n * (pw + m)
@@ -301,7 +345,8 @@ def render_group_export(columns: list[GroupColumn], title: str, info: str, signe
     text_h = max(len(c.lines) for c in columns) * line_h + fs // 2
     entries, note = difference_legend(threshold, signed)
     legend_h = max(round(fs * 2.4) if signed and cmap is not None else 0, (len(entries) + 1) * line_h)
-    height = m + title_h + head_h + 3 * (ph + m) + text_h + legend_h + m + line_h + m
+    rows_h = sum(rh + m for _, rh, _ in rows)
+    height = m + title_h + head_h + rows_h + text_h + legend_h + m + line_h + m
     out = Image.new("RGB", (width, height), BACKGROUND)
     draw = ImageDraw.Draw(out)
 
@@ -316,16 +361,18 @@ def render_group_export(columns: list[GroupColumn], title: str, info: str, signe
         _text(draw, (cx + (pw - _length(draw, c.heading, bold)) / 2, y), c.heading, bold)
     y += head_h
 
-    for r, name in enumerate(row_names):
-        ry = y + r * (ph + m)
-        _text(draw, (m, ry + ph / 2 - fs / 2), name, font)
+    for name, rh, panel in rows:
+        _text(draw, (m, y + rh / 2 - fs / 2), name, font)
         for i, c in enumerate(columns):
-            img = (c.before, c.after, Image.fromarray(c.diff_rgb))[r].convert("RGB").copy()
+            if name.endswith("PHOTO"):
+                _paste_photo(out, panel(c), x0 + i * (pw + m), y, pw, rh, fs)
+                continue
+            img = panel(c).convert("RGB").copy()
             if c.polygons:
                 _draw_polygons(img, c.polygons, max(2, pw // 400))
             _draw_scalebar(img, c.um_per_px, max(10, fs * 2 // 3))
-            out.paste(img, (x0 + i * (pw + m), ry))
-    y += 3 * (ph + m)
+            out.paste(img, (x0 + i * (pw + m), y))
+        y += rh + m
 
     for i, c in enumerate(columns):  # per-sample results under each column
         for k, line in enumerate(c.lines):

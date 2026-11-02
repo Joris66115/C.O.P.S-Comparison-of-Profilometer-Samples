@@ -165,3 +165,35 @@ def test_locator_is_below_difference_legend():
     legend_ys, _ = colour_positions(out, (40, 90, 220))
     map_ys, _ = colour_positions(out, (0, 200, 255))
     assert legend_ys.max() < map_ys.min()
+
+
+def _where(arr, colour):
+    ys, xs = np.nonzero((arr == colour).all(axis=2))
+    return ys, xs
+
+
+def test_render_export_with_photos_above_before_and_after():
+    before, after, diff = panels()
+    plain = render_export(before, after, diff, um_per_px=10.0, title="M1", info="i", signed=True,
+                          threshold=2.0, cmap=default_colourmap())
+    photo_b = Image.new("RGB", (800, 600), (250, 10, 10))
+    photo_a = Image.new("RGB", (600, 800), (10, 250, 10))
+    out = render_export(before, after, diff, um_per_px=10.0, title="M1", info="i", signed=True,
+                        threshold=2.0, cmap=default_colourmap(), photos=(photo_b, photo_a))
+    assert out.width == plain.width and out.height > plain.height + 200
+    arr = np.asarray(out)
+    by, bx = _where(arr, (250, 10, 10))
+    ay, ax = _where(arr, (10, 250, 10))
+    panel_y, _ = _where(arr, np.asarray(before)[0, 0])
+    assert bx.max() < 400 + 2 * 20 < ax.min()  # before photo in the first column, after photo in the second
+    assert by.max() < panel_y.min() and ay.max() < panel_y.min()  # photos above the measurements
+    assert bx.max() - bx.min() + 1 == 400  # landscape photo fills the panel width
+    assert ax.max() - ax.min() + 1 < 400  # portrait photo keeps its aspect ratio
+
+
+def test_render_export_missing_photo_is_a_grey_cell():
+    before, after, diff = panels()
+    out = render_export(before, after, diff, um_per_px=10.0, title="M1", info="i", signed=True,
+                        threshold=2.0, cmap=default_colourmap(), photos=(None, None))
+    ys, xs = _where(np.asarray(out), (235, 235, 235))
+    assert len(ys) > 400 * 200

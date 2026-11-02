@@ -19,6 +19,7 @@ from .colour import delta_e76, srgb_to_lab
 from .colourmap import Colourmap, default_colourmap, load_csv, rgb_to_height
 from .crop import crop_to_frame, find_plot_frame
 from .groups import GroupStore
+from .photos import PhotoStore
 from .difference import Plane, fit_plane, histogram, percentages, subtract_plane
 from .images import read_rgb
 from .masks import Polygon, load_masks, polygons_to_mask, save_masks
@@ -413,7 +414,7 @@ def write_summary(cache: Path) -> Path:
 
 
 def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=None, groups_file=None,
-                log=print) -> Path:
+                photo_folders=(None, None), log=print) -> Path:
     before_dir, after_dir, cache = Path(before_dir), Path(after_dir), Path(out_dir)
     cache.mkdir(parents=True, exist_ok=True)
     _check_or_write_manifest(cache, settings, before_dir, after_dir)
@@ -424,6 +425,8 @@ def run_prepare(before_dir, after_dir, out_dir, settings: Settings, masks_file=N
         save_masks(cache / "masks.json", masks)
     if groups_file:
         GroupStore(cache / "groups.csv").import_from(groups_file)
+    if any(photo_folders):
+        PhotoStore(cache).set_folders(*photo_folders)
 
     log_lines = [f"=== prepare {_now()} ({NAME} {__version__})"]
 

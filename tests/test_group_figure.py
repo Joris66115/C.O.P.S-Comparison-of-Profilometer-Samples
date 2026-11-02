@@ -62,3 +62,58 @@ def test_group_figure_from_cache(cache):
     assert path.parent == cache / "exports" and path.name == "group-Settings-A-B-2um.jpg"
     img = Image.open(path)
     assert img.width > 4 * 300
+
+
+def test_group_export_with_photo_rows():
+    from profilometer_comparison.colourmap import default_colourmap
+    cols = [column((200, 0, 0)), column((0, 0, 200))]
+    plain = render_group_export(cols, title="G", info="i", signed=True, threshold=2.0, cmap=default_colourmap())
+    cols[0].before_photo = Image.new("RGB", (900, 600), (250, 250, 0))
+    cols[1].after_photo = Image.new("RGB", (900, 600), (0, 250, 250))
+    out = render_group_export(cols, title="G", info="i", signed=True, threshold=2.0, cmap=default_colourmap(),
+                              photos=True)
+    assert out.height > plain.height + 2 * 150
+    arr = np.asarray(out)
+    by, _ = np.nonzero((arr == (250, 250, 0)).all(axis=2))
+    ay, _ = np.nonzero((arr == (0, 250, 250)).all(axis=2))
+    red_y, _ = np.nonzero((arr == (200, 0, 0)).all(axis=2))
+    # rows: before photo, before, after photo, after, difference
+    assert by.max() < red_y.min() and red_y.min() < ay.min() < red_y.max()
+
+
+def _photos(tmp_path, samples):
+    folders = []
+    for which, colour in (("before", (250, 250, 0)), ("after", (0, 250, 250))):
+        folder = tmp_path / f"{which}-photos"
+        folder.mkdir()
+        for s in samples:
+            Image.new("RGB", (900, 600), colour).save(folder / f"{s}.jpg")
+        folders.append(folder)
+    return folders
+
+
+def test_group_figure_includes_photos_when_folders_set(cache, tmp_path):
+    from profilometer_comparison.group_figure import export_group
+    from profilometer_comparison.photos import PhotoStore
+    from profilometer_comparison.viewer_state import ViewerState
+    store = GroupStore(cache / "groups.csv")
+    store.assign("M1", "A", "1 s")
+    store.assign("M2", "A", "2 s")
+    without = Image.open(export_group(ViewerState(cache), "A")[0])
+    PhotoStore(cache).set_folders(*_photos(tmp_path, ["M1"]))  # M2 has no photos: grey cells
+    with_photos = Image.open(export_group(ViewerState(cache), "A")[0])
+    assert with_photos.height > without.height
+
+
+def test_export_all_groups(cache):
+    from profilometer_comparison.group_figure import export_all_groups
+    from profilometer_comparison.viewer_state import ViewerState
+    store = GroupStore(cache / "groups.csv")
+    store.assign("M1", "A", "1 s")
+    store.assign("M2", "A", "2 s")
+    store.assign("M7", "B", "5 s")
+    store.assign("M99", "C", "1 s")  # not compared: group C is skipped
+    done, skipped = export_all_groups(ViewerState(cache))
+    assert [g for g, _ in done] == ["A", "B"]
+    assert all(p.exists() for _, p in done)
+    assert [g for g, _ in skipped] == ["C"]

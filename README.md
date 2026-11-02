@@ -86,6 +86,8 @@ python -m profilometer_comparison view RESULTS
 | g | put the sample in a group with a label, e.g. its irradiation time (see Groups below) |
 | Shift + E | export the group of the current sample as one figure |
 | Shift + G | import the groups of another results folder (see Groups below) |
+| Shift + A | export the figures of all groups at once |
+| p | choose the folders with the photographs taken before and after (see Photographs below) |
 
 In the difference panel, **blue** means the surface was lowered by at least the threshold (material lost), **red** that it was raised by at least the threshold (material added), **grey** that it changed by less than the threshold (no significant change), and white that there is no data. Δh = height after − height before.
 
@@ -98,7 +100,17 @@ Samples that differ in one setting only (for example the same laser settings at 
 - Press **g** on a sample, choose an existing group or type a new name, and enter a **label** such as `1 s`, `0.5 s` or `12 s`. Press **g** again to change the label, move the sample to another group, or remove it. Each sample is in at most one group.
 - Groups are stored in `RESULTS/groups.csv` (group, sample, label) and appear as `group` and `label` columns in `summary.csv`.
 - **Reusing groups** (e.g. the pseudo-colour groups for the true-colour comparison): press **Shift + G** in the viewer and select the other results folder, or pass `--groups OTHER_RESULTS` (folder or its `groups.csv`) to `prepare`. Imported groups replace the group of the same sample; samples not grouped in the import keep theirs. Samples that are not compared yet are kept too, so later batches are grouped automatically.
-- **Shift + E** exports `exports/group-<name>-<threshold>.jpg`: one column per sample, ordered by the number in the label (labels without a number last), with rows before / after / difference, a scale bar on every panel, the changed area, rotation and shift under each column, and a shared legend.
+- **Shift + E** exports `exports/group-<name>-<threshold>.jpg`: one column per sample, ordered by the number in the label (labels without a number last), with rows before / after / difference (with photographs: before photo / before / after photo / after / difference), a scale bar on every panel, the changed area, rotation and shift under each column, and a shared legend.
+- **Shift + A** exports the figures of **all** groups at once, at the current threshold. Without opening the viewer: `python -m profilometer_comparison export-groups RESULTS` (optionally `--threshold 5`; default: the threshold last used in the viewer). Groups without compared samples are skipped and listed.
+
+### Photographs
+
+Photographs taken before and after treatment can be shown next to the measurements: the before photo above the BEFORE panel, the after photo above the AFTER panel.
+
+- Press **p** in the viewer and choose the folder with the **before** photos, then the folder with the **after** photos (Cancel keeps the current folder, so you can set one of them later). Or pass `--photos-before FOLDER --photos-after FOLDER` to `prepare`. The folders are remembered in `RESULTS/photos.json`; the photos themselves are not copied.
+- A photo belongs to a sample when its name is the sample ID (`M1.jpg`, `m1.JPG`, `M1.png`, `.jpeg` and `.tif` also work) or starts with it (`M1-before.jpg`; `M10.jpg` belongs to M10, not M1). A high-res rescan (`M35-high-res`) uses the photo of its sample (`M35.jpg`). The camera orientation stored in the photo is applied.
+- Samples without a photo show *no photo*. After choosing the folders, the status line tells how many samples have a before and an after photo.
+- Exported figures (**e**, zoom **e**, **Shift + E**, **Shift + A**) include the photographs. Photos have no scale bar: their scale is not known to C.O.P.S.
 
 ### Zoom window
 
