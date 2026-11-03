@@ -1,6 +1,7 @@
 """Photographs of the samples before and after treatment, shown next to the measurements.
 
-The photo folders are remembered in RESULTS/photos.json. A photo belongs to a sample when its
+The photo folders, and per sample a turn of each photo by a multiple of 90°, are remembered in
+RESULTS/photos.json. A photo belongs to a sample when its
 name is the sample ID ('M1.jpg'), or starts with it ('M1-before.jpg', not 'M10.jpg').
 """
 from __future__ import annotations
@@ -39,9 +40,11 @@ class PhotoStore:
     def __init__(self, cache: str | Path):
         self.path = Path(cache) / "photos.json"
         self.folders: dict[str, Path | None] = {"before": None, "after": None}
+        self.rotations: dict[str, dict[str, int]] = {}  # sample -> {"before": degrees clockwise, ...}
         if self.path.exists():
             saved = json.loads(self.path.read_text(encoding="utf-8"))
             self.folders = {w: Path(saved[w]) if saved.get(w) else None for w in WHICH}
+            self.rotations = saved.get("rotation", {})
         self._indexes: dict[str, dict[str, Path]] = {}
 
     @property
@@ -54,9 +57,26 @@ class PhotoStore:
             if folder:
                 self.folders[which] = Path(folder)
         self._indexes = {}
+        self._save()
+
+    def rotation(self, sample: str, which: str) -> int:
+        """Clockwise turn of the photo in degrees (0, 90, 180 or 270)."""
+        return self.rotations.get(sample, {}).get(which, 0)
+
+    def rotate(self, sample: str, which: str) -> int:
+        """Turn the photo a further 90° clockwise; returns the new turn."""
+        turn = (self.rotation(sample, which) + 90) % 360
+        self.rotations.setdefault(sample, {})[which] = turn
+        if not any(self.rotations[sample].values()):
+            del self.rotations[sample]
+        self._save()
+        return turn
+
+    def _save(self) -> None:
+        saved = {w: str(f) if f else None for w, f in self.folders.items()}
+        saved["rotation"] = self.rotations
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps({w: str(f) if f else None for w, f in self.folders.items()}, indent=1),
-                             encoding="utf-8")
+        self.path.write_text(json.dumps(saved, indent=1), encoding="utf-8")
 
     def find(self, sample: str, which: str) -> Path | None:
         folder = self.folders[which]
@@ -73,12 +93,16 @@ class PhotoStore:
         return index.get(key) or (index.get(m.group(0)) if m else None)
 
     def load(self, sample: str, which: str, max_size: int) -> Image.Image | None:
-        """The photo upright (camera orientation applied), longest side at most `max_size`; None if there is none."""
+        """The photo upright (camera orientation and the sample's own turn applied), longest side at most
+        `max_size`; None if there is none."""
         path = self.find(sample, which)
         if path is None:
             return None
         with Image.open(path) as img:
             img.draft("RGB", (max_size, max_size))  # fast reduced JPEG decoding
             img = ImageOps.exif_transpose(img).convert("RGB")
+        turn = self.rotation(sample, which)
+        if turn:
+            img = img.rotate(-turn, expand=True)  # PIL turns counter-clockwise
         img.thumbnail((max_size, max_size), Image.BILINEAR)
         return img

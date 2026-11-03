@@ -20,7 +20,7 @@ ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
 HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
         "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   click: zoom\n"
-        "g group   Shift+G import groups   Shift+E export group   Shift+A export all groups   p photo folders")
+        "g group   Shift+G import groups   Shift+E export group   Shift+A export all groups   p photo folders   r / Shift+R turn before / after photo 90°")
 PHOTO_RATIO = 0.6  # height of the photo row relative to the measurement panels
 
 
@@ -119,6 +119,8 @@ class Viewer:
         r.bind("G", lambda e: self._import_groups())
         r.bind("A", lambda e: self._export_all_groups())
         r.bind("p", lambda e: self._photo_folders())
+        r.bind("r", lambda e: self._rotate_photo("before"))
+        r.bind("R", lambda e: self._rotate_photo("after"))
         r.bind("<Return>", lambda e: self._close_polygon())
         r.bind("<BackSpace>", lambda e: self._undo_point())
         r.bind("<Delete>", lambda e: self._delete_polygon())
@@ -552,6 +554,19 @@ class Viewer:
             sum(store.find(s, "after") is not None for s in self.state.samples)
         self._update_status(f"Photos found for {found[0]} (before) and {found[1]} (after) "
                             f"of {len(self.state.samples)} samples")
+
+    def _rotate_photo(self, which: str) -> None:
+        """Turn the before or after photo of this sample 90° clockwise (remembered; used in all exports)."""
+        if self.mask_mode:
+            return
+        store, sample = self.state.photos, self.state.current
+        if store.find(sample, which) is None:
+            hint = "" if store.configured else ": press p to choose the photo folders"
+            self._update_status(f"No {which} photo for {sample}{hint}")
+            return
+        turn = store.rotate(sample, which)
+        self._render_photos()
+        self._update_status(f"{which.capitalize()} photo of {sample} turned to {turn}° clockwise")
 
     def _export_all_groups(self) -> None:
         if self.mask_mode:

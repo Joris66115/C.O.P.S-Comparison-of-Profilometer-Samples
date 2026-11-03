@@ -75,3 +75,30 @@ def test_fit_photo_keeps_aspect():
     img = Image.new("RGB", (4000, 3000))
     assert fit_photo(img, 400, 400).size == (400, 300)
     assert fit_photo(img, 400, 150).size == (200, 150)
+
+
+def test_rotate_photo_per_sample_and_side(tmp_path):
+    folder = tmp_path / "p"
+    folder.mkdir()
+    img = Image.new("RGB", (400, 300), (0, 0, 0))
+    img.putpixel((0, 0), (255, 0, 0))  # marker in the top-left corner
+    img.save(folder / "M1.png")
+    _photo(folder / "M2.png")
+    store = PhotoStore(tmp_path / "results")
+    store.set_folders(folder, folder)
+    assert store.rotation("M1", "before") == 0
+    assert store.rotate("M1", "before") == 90
+    turned = store.load("M1", "before", 1000)
+    assert turned.size == (300, 400)  # 90° clockwise: the top-left corner moves to the top-right
+    assert turned.getpixel((299, 0)) == (255, 0, 0)
+    assert store.load("M1", "after", 1000).size == (400, 300)  # the after photo is not turned
+    assert store.load("M2", "before", 1000).size == (400, 300)  # nor other samples
+    for _ in range(3):
+        store.rotate("M1", "before")
+    assert store.rotation("M1", "before") == 0  # four turns: back to the start
+    store.rotate("M1", "after")
+    reopened = PhotoStore(tmp_path / "results")  # remembered in photos.json
+    assert reopened.rotation("M1", "after") == 90
+    assert reopened.folders["before"] == folder
+    reopened.set_folders(None, folder)  # choosing folders keeps the rotations
+    assert PhotoStore(tmp_path / "results").rotation("M1", "after") == 90

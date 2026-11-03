@@ -1,8 +1,8 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 title: "C.O.P.S. (Comparison of Profilometer Samples)"
-version: 1.5.0
-date-released: 2026-11-02
+version: 1.6.0
+date-released: 2026-11-03
 authors:
   - family-names: Nagtegaal
     given-names: Joris

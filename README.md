@@ -88,6 +88,7 @@ python -m profilometer_comparison view RESULTS
 | Shift + G | import the groups of another results folder (see Groups below) |
 | Shift + A | export the figures of all groups at once |
 | p | choose the folders with the photographs taken before and after (see Photographs below) |
+| r / Shift + R | turn the before / after photo of this sample 90° clockwise |
 
 In the difference panel, **blue** means the surface was lowered by at least the threshold (material lost), **red** that it was raised by at least the threshold (material added), **grey** that it changed by less than the threshold (no significant change), and white that there is no data. Δh = height after − height before.
 
@@ -109,8 +110,9 @@ Photographs taken before and after treatment can be shown next to the measuremen
 
 - Press **p** in the viewer and choose the folder with the **before** photos, then the folder with the **after** photos (Cancel keeps the current folder, so you can set one of them later). Or pass `--photos-before FOLDER --photos-after FOLDER` to `prepare`. The folders are remembered in `RESULTS/photos.json`; the photos themselves are not copied.
 - A photo belongs to a sample when its name is the sample ID (`M1.jpg`, `m1.JPG`, `M1.png`, `.jpeg` and `.tif` also work) or starts with it (`M1-before.jpg`; `M10.jpg` belongs to M10, not M1). A high-res rescan (`M35-high-res`) uses the photo of its sample (`M35.jpg`). The camera orientation stored in the photo is applied.
+- **Turning a photo:** press **r** to turn the before photo and **Shift + R** to turn the after photo of the current sample by 90° clockwise (four presses bring it back). Each photo of each sample keeps its own turn, saved in `photos.json`; the original files are not changed.
 - Samples without a photo show *no photo*. After choosing the folders, the status line tells how many samples have a before and an after photo.
-- Exported figures (**e**, zoom **e**, **Shift + E**, **Shift + A**) include the photographs. Photos have no scale bar: their scale is not known to C.O.P.S.
+- Exported figures (**e**, zoom **e**, **Shift + E**, **Shift + A**) include the photographs, turned as in the viewer. Photos have no scale bar: their scale is not known to C.O.P.S.
 
 ### Zoom window
 
