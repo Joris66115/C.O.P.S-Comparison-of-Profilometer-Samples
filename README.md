@@ -83,8 +83,8 @@ python -m profilometer_comparison view RESULTS
 | a | back to automatic alignment (shift and rotation) |
 | click | open a full-resolution zoom window at that spot |
 | e | export the current sample as a JPG figure (also in the zoom window, at full resolution) |
-| g | put the sample in a group with a label, e.g. its irradiation time (see Groups below) |
-| Shift + E | export the group of the current sample as one figure |
+| g | put the sample in a group with a label, e.g. its irradiation time; a sample can be in several groups (see Groups below) |
+| Shift + E | export the group(s) of the current sample, one figure per group |
 | Shift + G | import the groups of another results folder (see Groups below) |
 | Shift + A | export the figures of all groups at once |
 | p | choose the folders with the photographs taken before and after (see Photographs below) |
@@ -98,10 +98,11 @@ The percentages read, for example, *"Whole surface: 3.21 % of the area changed b
 
 Samples that differ in one setting only (for example the same laser settings at 1, 2, 5 and 10 s irradiation) can be grouped and exported together.
 
-- Press **g** on a sample, choose an existing group or type a new name, and enter a **label** such as `1 s`, `0.5 s` or `12 s`. Press **g** again to change the label, move the sample to another group, or remove it. Each sample is in at most one group.
-- Groups are stored in `RESULTS/groups.csv` (group, sample, label) and appear as `group` and `label` columns in `summary.csv`.
-- **Reusing groups** (e.g. the pseudo-colour groups for the true-colour comparison): press **Shift + G** in the viewer and select the other results folder, or pass `--groups OTHER_RESULTS` (folder or its `groups.csv`) to `prepare`. Imported groups replace the group of the same sample; samples not grouped in the import keep theirs. Samples that are not compared yet are kept too, so later batches are grouped automatically.
-- **Shift + E** exports `exports/group-<name>-<threshold>.jpg`: one column per sample, ordered by the number in the label (labels without a number last), with rows before / after / difference (with photographs: before photo / before / after photo / after / difference), a scale bar on every panel, the changed area, rotation and shift under each column, and a shared legend.
+- Press **g** on a sample, choose an existing group or type a new name, and enter a **label** such as `1 s`, `0.5 s` or `12 s`. The dialog lists the groups the sample is already in.
+- A sample can be in **several groups**, with its own label in each: for example M7 in *Time series A* as `5 s` and in *Fluence series* as `0.8 J/cm²`. Press **g** again and choose another group to add it there; choose one of its groups to change its label there, or press *Remove from this group*.
+- Groups are stored in `RESULTS/groups.csv` (one row per group membership: group, sample, label) and appear as `group` and `label` columns in `summary.csv`; for a sample in several groups these list all of them, separated by `; ` and in the same order (e.g. `Fluence series; Time series A` and `0.8 J/cm²; 5 s`).
+- **Reusing groups** (e.g. the pseudo-colour groups for the true-colour comparison): press **Shift + G** in the viewer and select the other results folder, or pass `--groups OTHER_RESULTS` (folder or its `groups.csv`) to `prepare`. Imported memberships are added (an imported label replaces the label of the same sample in the same group); the samples' other groups are kept. Samples that are not compared yet are kept too, so later batches are grouped automatically.
+- **Shift + E** exports the figure of every group the current sample is in, as `exports/group-<name>-<threshold>.jpg`: one column per sample, ordered by the number in the label (labels without a number last), with rows before / after / difference (with photographs: before photo / before / after photo / after / difference), a scale bar on every panel, the changed area, rotation and shift under each column, and a shared legend.
 - **Shift + A** exports the figures of **all** groups at once, at the current threshold. Without opening the viewer: `python -m profilometer_comparison export-groups RESULTS` (optionally `--threshold 5`; default: the threshold last used in the viewer). Groups without compared samples are skipped and listed.
 
 ### Photographs

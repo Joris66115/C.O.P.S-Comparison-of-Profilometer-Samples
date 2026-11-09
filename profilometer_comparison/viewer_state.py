@@ -172,9 +172,9 @@ class ViewerState:
         return "; ".join(parts) + " (see summary.csv)" if parts else ""
 
     def group_text(self, sample: str | None = None) -> str:
-        """'group: Settings A · 1 s', or empty if the sample is in no group."""
-        found = self.groups.group_of(sample or self.current)
+        """'group: Settings A · 1 s', 'groups: Fluence; Time · 1 s', or empty if the sample is in no group."""
+        found = self.groups.groups_of(sample or self.current)
         if not found:
             return ""
-        group, label = found
-        return f"group: {group}" + (f" · {label}" if label else "")
+        parts = [group + (f" · {label}" if label else "") for group, label in found]
+        return ("group: " if len(parts) == 1 else "groups: ") + "; ".join(parts)

@@ -468,25 +468,41 @@ class Viewer:
 
     # ---------- groups ----------
     def _group_dialog(self) -> None:
-        """Assign the current sample to a group with a free-text label (e.g. irradiation time)."""
+        """Add the current sample to a group with a free-text label (e.g. irradiation time), change its label,
+        or take it out of a group. A sample can be in several groups."""
         if self.mask_mode:
             return
         s = self.state
         sample = s.current
-        group, label = s.groups.group_of(sample) or (self._last_group, "")
+        current = s.groups.groups_of(sample)
         top = tk.Toplevel(self.root)
-        top.title(f"Group for {sample}")
+        top.title(f"Groups of {sample}")
         top.transient(self.root)
-        tk.Label(top, text="Group (choose one or type a new name)").grid(row=0, column=0, columnspan=3,
-                                                                         sticky="w", padx=10, pady=(10, 2))
-        group_var = tk.StringVar(value=group)
+        member_text = "\n".join(f"  {g}" + (f"  ({label})" if label else "") for g, label in current) or "  none"
+        tk.Label(top, text=f"{sample} is in:\n{member_text}", justify=tk.LEFT).grid(
+            row=0, column=0, columnspan=3, sticky="w", padx=10, pady=(10, 4))
+        tk.Label(top, text="Group (choose one or type a new name)").grid(row=1, column=0, columnspan=3,
+                                                                         sticky="w", padx=10, pady=(6, 2))
+        start = self._last_group or (current[0][0] if current else "")
+        group_var = tk.StringVar(value=start)
         ttk.Combobox(top, textvariable=group_var, values=s.groups.groups(), width=34).grid(
-            row=1, column=0, columnspan=3, sticky="we", padx=10)
-        tk.Label(top, text="Label, e.g. irradiation time (1 s, 0.5 s, 12 s)").grid(row=2, column=0, columnspan=3,
-                                                                                  sticky="w", padx=10, pady=(8, 2))
-        label_var = tk.StringVar(value=label)
+            row=2, column=0, columnspan=3, sticky="we", padx=10)
+        tk.Label(top, text="Label in this group, e.g. irradiation time (1 s, 0.5 s, 12 s)").grid(
+            row=3, column=0, columnspan=3, sticky="w", padx=10, pady=(8, 2))
+        label_var = tk.StringVar()
         entry = tk.Entry(top, textvariable=label_var, width=36)
-        entry.grid(row=3, column=0, columnspan=3, sticky="we", padx=10)
+        entry.grid(row=4, column=0, columnspan=3, sticky="we", padx=10)
+
+        def label_in(group: str) -> str | None:
+            return next((label for g, label in current if g == group.strip()), None)
+
+        def on_group_change(*_args) -> None:  # show the sample's label in the chosen group, if it is in it
+            label = label_in(group_var.get())
+            if label is not None:
+                label_var.set(label)
+
+        group_var.trace_add("write", on_group_change)
+        on_group_change()
 
         def done(text: str) -> None:
             prepare.write_summary(s.cache)
@@ -494,22 +510,28 @@ class Viewer:
             self._update_status(text)
 
         def save(_event=None) -> None:
+            group = group_var.get().strip()
             try:
-                s.groups.assign(sample, group_var.get(), label_var.get())
+                s.groups.assign(sample, group, label_var.get())
             except ValueError as exc:
                 messagebox.showwarning("Group", str(exc), parent=top)
                 return
-            self._last_group = group_var.get().strip()
-            done(f"{sample} added to group {self._last_group}")
+            self._last_group = group
+            done(f"{sample} {'label changed in' if label_in(group) is not None else 'added to'} group {group}")
 
         def remove() -> None:
-            s.groups.remove(sample)
-            done(f"{sample} removed from its group")
+            group = group_var.get().strip()
+            if label_in(group) is None:
+                messagebox.showwarning("Group", f"{sample} is not in group {group!r}.", parent=top)
+                return
+            s.groups.remove(sample, group)
+            done(f"{sample} removed from group {group}")
 
-        tk.Button(top, text="Save (Enter)", command=save).grid(row=4, column=0, padx=10, pady=10, sticky="w")
-        if s.groups.group_of(sample):
-            tk.Button(top, text="Remove from group", command=remove).grid(row=4, column=1, pady=10)
-        tk.Button(top, text="Cancel (Esc)", command=top.destroy).grid(row=4, column=2, padx=10, pady=10, sticky="e")
+        tk.Button(top, text="Add / save label (Enter)", command=save).grid(row=5, column=0, padx=10, pady=10,
+                                                                           sticky="w")
+        if current:
+            tk.Button(top, text="Remove from this group", command=remove).grid(row=5, column=1, pady=10)
+        tk.Button(top, text="Cancel (Esc)", command=top.destroy).grid(row=5, column=2, padx=10, pady=10, sticky="e")
         top.bind("<Return>", save)
         top.bind("<Escape>", lambda e: top.destroy())
         entry.focus_set()
@@ -587,18 +609,22 @@ class Viewer:
         self._update_status(text)
 
     def _export_group(self) -> None:
-        found = self.state.groups.group_of(self.state.current)
+        """Export every group the current sample is in."""
+        found = self.state.groups.groups_of(self.state.current)
         if not found:
             self._update_status("This sample is in no group yet: press g to add it to one.")
             return
-        self._update_status(f"Exporting group {found[0]}…")
+        self._update_status(f"Exporting {len(found)} group(s)…")
         self.root.update_idletasks()
-        try:
-            path, members = export_group(self.state, found[0])
-        except Exception as exc:
-            messagebox.showerror("Group export failed", str(exc))
-            return
-        self._update_status(f"Exported {path} ({len(members)} samples: {', '.join(m for m, _ in members)})")
+        lines = []
+        for group, _ in found:
+            try:
+                path, members = export_group(self.state, group)
+            except Exception as exc:
+                messagebox.showerror("Group export failed", f"{group}: {exc}")
+                continue
+            lines.append(f"Exported {path} ({len(members)} samples: {', '.join(m for m, _ in members)})")
+        self._update_status("\n".join(lines))
 
     # ---------- export ----------
     def _mask_pixels(self, origin_px, step: int) -> list:

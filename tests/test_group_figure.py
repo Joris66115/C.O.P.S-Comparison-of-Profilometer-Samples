@@ -42,11 +42,15 @@ def cache(tmp_path, data_dir):
 
 
 def test_summary_has_group_and_label(cache):
-    GroupStore(cache / "groups.csv").assign("M7", "Settings A", "5 s")
+    store = GroupStore(cache / "groups.csv")
+    store.assign("M7", "Settings A", "5 s")
+    store.assign("M2", "Time", "2 s")
+    store.assign("M2", "Fluence", "0.8 J/cm²")  # two groups: listed together, in the same order
     write_summary(cache)
     with open(cache / "summary.csv", encoding="utf-8") as fh:
         rows = {r["sample"]: r for r in csv.DictReader(fh) if r["region"] == "all"}
     assert (rows["M7"]["group"], rows["M7"]["label"]) == ("Settings A", "5 s")
+    assert (rows["M2"]["group"], rows["M2"]["label"]) == ("Fluence; Time", "0.8 J/cm²; 2 s")
     assert (rows["M1"]["group"], rows["M1"]["label"]) == ("", "")
 
 
@@ -117,3 +121,14 @@ def test_export_all_groups(cache):
     assert [g for g, _ in done] == ["A", "B"]
     assert all(p.exists() for _, p in done)
     assert [g for g, _ in skipped] == ["C"]
+
+
+def test_group_text_lists_every_group(cache):
+    from profilometer_comparison.viewer_state import ViewerState
+    store = GroupStore(cache / "groups.csv")
+    state = ViewerState(cache)
+    assert state.group_text("M1") == ""
+    store.assign("M1", "Time", "1 s")
+    store.assign("M1", "Fluence", "")
+    state.groups = GroupStore(cache / "groups.csv")
+    assert state.group_text("M1") == "groups: Fluence; Time · 1 s"

@@ -397,9 +397,10 @@ def write_summary(cache: Path) -> Path:
     entries.sort(key=lambda e: natural_key(e[0]))
     groups = GroupStore(cache / "groups.csv")
     for sample, rows in entries:
-        group = groups.group_of(sample) or ("", "")
+        found = groups.groups_of(sample)  # a sample in several groups: '; '-separated, in the same order
         for row in rows:
-            row["group"], row["label"] = group
+            row["group"] = "; ".join(g for g, _ in found)
+            row["label"] = "; ".join(label for _, label in found)
 
     path = cache / "summary.csv"
     tmp = path.with_suffix(".tmp")

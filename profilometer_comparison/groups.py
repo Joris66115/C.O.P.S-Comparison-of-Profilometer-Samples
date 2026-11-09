@@ -1,4 +1,7 @@
-"""Sample groups (e.g. one laser setting at different irradiation times), stored in groups.csv."""
+"""Sample groups (e.g. one laser setting at different irradiation times), stored in groups.csv.
+
+One row per membership (group, sample, label); a sample may appear in several groups.
+"""
 from __future__ import annotations
 
 import csv
@@ -16,24 +19,29 @@ def label_number(label: str) -> float | None:
 
 
 class GroupStore:
-    """One group (and free-text label) per sample; rewritten on every change."""
+    """Group memberships: a sample can be in several groups, with its own free-text label in each.
+
+    Rewritten on every change.
+    """
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
-        self.rows: dict[str, dict] = {}  # sample -> {"group", "sample", "label"}, insertion order kept
+        # (group, sample) -> {"group", "sample", "label"}, insertion order kept
+        self.rows: dict[tuple[str, str], dict] = {}
         if self.path.exists():
             with open(self.path, newline="", encoding="utf-8") as fh:
                 for row in csv.DictReader(fh):
                     if row.get("sample") and row.get("group"):
-                        self.rows[row["sample"].strip()] = {
-                            "group": row["group"].strip(), "sample": row["sample"].strip(),
-                            "label": (row.get("label") or "").strip()}
+                        group, sample = row["group"].strip(), row["sample"].strip()
+                        self.rows[(group, sample)] = {"group": group, "sample": sample,
+                                                      "label": (row.get("label") or "").strip()}
 
     def import_from(self, source: str | Path) -> int:
-        """Copy the groups of another comparison (its results folder or groups.csv); returns the number of samples.
+        """Add the groups of another comparison (its results folder or groups.csv); returns the number of samples.
 
-        Imported groups replace this comparison's group for the same sample; other samples are left alone.
-        Samples that are not compared here (yet) are kept, so later batches are grouped automatically.
+        Imported memberships are added (with the imported label if the sample is already in that group);
+        the sample's other groups are kept. Samples that are not compared here (yet) are kept as well,
+        so later batches are grouped automatically.
         """
         source = Path(source)
         if source.is_dir():
@@ -41,30 +49,34 @@ class GroupStore:
         if not source.is_file():
             raise FileNotFoundError(f"no groups.csv found at {source}")
         imported = GroupStore(source).rows
-        for sample, row in imported.items():
-            self.rows.pop(sample, None)
-            self.rows[sample] = dict(row)
+        for key, row in imported.items():
+            self.rows[key] = dict(row)
         self._save()
-        return len(imported)
+        return len({sample for _, sample in imported})
 
     def assign(self, sample: str, group: str, label: str) -> None:
+        """Put the sample in the group with this label (only the label changes if it is already in it)."""
         group = group.strip()
         if not group:
             raise ValueError("a group needs a name")
-        self.rows.pop(sample, None)  # re-adding puts it at the end of the insertion order
-        self.rows[sample] = {"group": group, "sample": sample, "label": label.strip()}
+        self.rows[(group, sample)] = {"group": group, "sample": sample, "label": label.strip()}
         self._save()
 
-    def remove(self, sample: str) -> None:
-        if self.rows.pop(sample, None) is not None:
+    def remove(self, sample: str, group: str | None = None) -> None:
+        """Take the sample out of one group, or out of all its groups if no group is given."""
+        keys = [k for k in self.rows if k[1] == sample and (group is None or k[0] == group)]
+        for key in keys:
+            del self.rows[key]
+        if keys:
             self._save()
 
-    def group_of(self, sample: str) -> tuple[str, str] | None:
-        row = self.rows.get(sample)
-        return (row["group"], row["label"]) if row else None
+    def groups_of(self, sample: str) -> list[tuple[str, str]]:
+        """(group, label) of every group the sample is in, sorted by group name."""
+        return sorted(((row["group"], row["label"]) for (_, s), row in self.rows.items() if s == sample),
+                      key=lambda gl: gl[0].lower())
 
     def groups(self) -> list[str]:
-        return sorted({row["group"] for row in self.rows.values()}, key=str.lower)
+        return sorted({group for group, _ in self.rows}, key=str.lower)
 
     def members(self, group: str) -> list[tuple[str, str]]:
         """(sample, label) ordered by the number in the label; labels without a number last."""
