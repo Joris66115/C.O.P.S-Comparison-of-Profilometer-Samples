@@ -19,14 +19,13 @@ PANEL_MAX = 1000  # px, longest side of each panel in a group figure
 
 def _column_lines(state: ViewerState, sample: str) -> list[str]:
     t, unit = state.threshold, "µm" if state.signed else "ΔE"
-    regions = ["glaze", "encrustation"] if state.percentages("encrustation", sample) is not None else ["glaze"]
-    lines = []
-    for region in regions:
-        p = state.percentages(region, sample)
-        prefix = f"{region}: " if len(regions) > 1 else ""
-        lines.append(f"{prefix}{p['diff']:.2f} % changed by ≥ {t:g} {unit}")
-        if state.signed:
-            lines.append(f"({p['lower']:.2f} % lowered, {p['higher']:.2f} % raised)")
+    p = state.percentages("glaze", sample)  # without masked measurement errors
+    lines = [f"{p['diff']:.2f} % changed by ≥ {t:g} {unit}"]
+    if state.signed:
+        lines.append(f"({p['lower']:.2f} % lowered, {p['higher']:.2f} % raised)")
+    masked = state.masked_pct(sample)
+    if masked is not None:
+        lines.append(f"masked measurement error: {masked:.2f} % of area, not counted")
     m = state.meta(sample)
     lines.append(f"{rotation_text(m)} · shift {m['shift_x_um']:+.1f}/{m['shift_y_um']:+.1f} µm")
     return lines

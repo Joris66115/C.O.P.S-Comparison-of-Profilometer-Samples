@@ -23,8 +23,11 @@ NO_DATA = (255, 255, 255)
 MARKED = (255, 0, 200)
 
 
-REGION_LABELS = {"glaze": "Glaze (outside encrustation masks)", "encrustation": "Encrustation (inside masks)"}
+# Masks mark measurement errors: they are left out of the percentages. (In summary.csv and the cache the
+# unmasked and masked parts are still called "glaze" and "encrustation", so older results stay readable.)
 WHOLE_SURFACE = "Whole surface"
+WITHOUT_MASKED = "Without masked measurement errors"
+MASKED_LABEL = "Masked as measurement error, not counted"
 
 
 def change_sentence(p: dict, threshold: float, signed: bool) -> str:
@@ -114,6 +117,15 @@ class ViewerState:
         hist = self._hists[sample].get(region)
         return None if hist is None else percentages(hist, self.threshold, self.signed)
 
+    def masked_pct(self, sample: str | None = None) -> float | None:
+        """% of the measured area masked as measurement error; None if the sample has no mask."""
+        sample = sample or self.current
+        self.percentages(sample=sample)  # loads the histograms
+        hists = self._hists[sample]
+        if "encrustation" not in hists:
+            return None
+        return 100 * float(hists["encrustation"].sum()) / max(1, float(hists["all"].sum()))
+
     def reload(self, sample: str) -> None:
         self._meta.pop(sample, None)
         self._hists.pop(sample, None)
@@ -144,13 +156,14 @@ class ViewerState:
             json.dumps({"last_sample": self.current, "threshold": self.threshold}), encoding="utf-8")
 
     def region_lines(self, sample: str | None = None) -> list[str]:
-        """One line per region: 'Whole surface: …', or glaze and encrustation separately when masked."""
+        """'Whole surface: …', or, when measurement errors are masked, the percentages without the masked
+        areas plus the share of the area that was masked."""
         sample = sample or self.current
-        if self.percentages(region="encrustation", sample=sample) is None:
-            p = self.percentages(region="glaze", sample=sample)
-            return [f"{WHOLE_SURFACE}: {change_sentence(p, self.threshold, self.signed)}"]
-        return [f"{label}: {change_sentence(self.percentages(region=region, sample=sample), self.threshold, self.signed)}"
-                for region, label in REGION_LABELS.items()]
+        sentence = change_sentence(self.percentages(region="glaze", sample=sample), self.threshold, self.signed)
+        masked = self.masked_pct(sample)
+        if masked is None:
+            return [f"{WHOLE_SURFACE}: {sentence}"]
+        return [f"{WITHOUT_MASKED}: {sentence}", f"{MASKED_LABEL}: {masked:.2f} % of the measured area"]
 
     def export_texts(self, sample: str | None = None) -> tuple[str, str]:
         """Title (one line per region) and info line for an exported figure."""

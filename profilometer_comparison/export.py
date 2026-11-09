@@ -15,6 +15,7 @@ from .viewer_state import HIGHER, LOWER, MARKED, NO_DATA, UNCHANGED, change_sent
 GREY_AFTER = (150, 150, 150)  # legend swatch for 'after image shown in grey' (true-colour)
 
 MASK_COLOUR = (255, 220, 0)
+MASK_LEGEND = "masked: measurement error, not counted in the percentages"
 TEXT = (20, 20, 20)
 BACKGROUND = (255, 255, 255)
 # Fonts with µ, ≥ and Δ, tried in order (Linux, macOS, Windows, ...); Pillow searches the system font folders.
@@ -290,10 +291,10 @@ def render_export(before: Image.Image, after: Image.Image, diff_rgb: np.ndarray,
             tick += step
         y += legend_h
 
-    # Mask outlines appear on all three panels, so their legend entry stays on the left
+    # Mask outlines (measurement errors) appear on all three panels, so their legend entry stays on the left
     if polygons:
         draw.rectangle([m, y, m + fs, y + fs], outline=MASK_COLOUR, width=max(2, fs // 6))
-        _text(draw, (m + fs * 1.4, y), "encrustation mask", font)
+        _text(draw, (m + fs * 1.4, y), MASK_LEGEND, font)
 
     _text(draw, (m, bottom_y + bottom_h - info_h), info, _font(round(fs * 0.85)), fill=(90, 90, 90))
     return out
@@ -403,7 +404,7 @@ def render_group_export(columns: list[GroupColumn], title: str, info: str, signe
         _text(draw, (lx + fs * 1.4, yy), text, font)
     _text(draw, (lx, y + len(entries) * line_h), note, small, fill=(90, 90, 90))
     if any(c.polygons for c in columns):
-        _text(draw, (m, y + round(fs * 2.4)), "yellow outline: encrustation mask", small, fill=(90, 90, 90))
+        _text(draw, (m, y + round(fs * 2.4)), f"yellow outline = {MASK_LEGEND}", small, fill=(90, 90, 90))
     y += legend_h + m
 
     _text(draw, (m, y), info, _font(round(fs * 0.85)), fill=(90, 90, 90))

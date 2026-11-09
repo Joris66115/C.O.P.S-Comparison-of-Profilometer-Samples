@@ -1,4 +1,4 @@
-"""Encrustation masks: polygons in µm of the before image (x right, y down)."""
+"""Masks of measurement errors (left out of the percentages): polygons in µm of the before image (x right, y down)."""
 from __future__ import annotations
 
 import json

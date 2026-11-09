@@ -114,12 +114,17 @@ def test_export_texts(state):
 def test_region_lines_without_and_with_masks(state):
     lines = state.region_lines()
     assert len(lines) == 1 and lines[0].startswith("Whole surface: ")
-    # a sample with an encrustation mask reports glaze and encrustation separately
+    # masked areas are measurement errors: left out of the percentages, their area is reported
     state.percentages()  # loads the histograms into the state's cache
-    state._hists[state.current]["encrustation"] = state._hists[state.current]["glaze"]
+    hists = state._hists[state.current]
+    hists["encrustation"] = hists["all"] // 4  # about a quarter of the area masked
     lines = state.region_lines()
-    assert lines[0].startswith("Glaze (outside encrustation masks): ")
-    assert lines[1].startswith("Encrustation (inside masks): ")
+    assert lines[0].startswith("Without masked measurement errors: ")
+    assert "% of the area changed by ≥ 2 µm" in lines[0]
+    assert lines[1].startswith("Masked as measurement error, not counted: ")
+    assert lines[1].endswith("% of the measured area")
+    assert 24 < state.masked_pct() < 26
+    assert "ncrustation" not in "".join(lines)
 
 
 def test_unmatched_samples_reported(tmp_path, data_dir):

@@ -13,12 +13,12 @@ from . import NAME, prepare
 from .group_figure import export_all_groups, export_group
 from .photos import fit_photo
 from .export import Locator, _draw_polygons, format_length, region_summary, render_export, upscale_for_export
-from .masks import load_masks, point_in_polygon, save_masks, validate_polygon
+from .masks import load_masks, point_in_polygon, polygons_to_mask, save_masks, validate_polygon
 from .viewer_state import ViewerState, render_difference, rotation_text
 
 ROTATION_STEP = 0.05  # degrees per [ or ] key press
 
-HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask   "
+HELP = ("← → sample   s flag   ↑ ↓ threshold   f flagged only   b blink   m mask errors   "
         "Shift+arrows nudge (Shift+Alt: ×10)   [ ] rotate   a auto-align   e export JPG   click: zoom\n"
         "g group   Shift+G import groups   Shift+E export group   Shift+A export all groups   p photo folders   r / Shift+R turn before / after photo 90°")
 PHOTO_RATIO = 0.6  # height of the photo row relative to the measurement panels
@@ -237,7 +237,7 @@ class Viewer:
         if m["align_warning"]:
             lines.append(f"⚠ alignment: {m['align_warning']}")
         if self.mask_mode:
-            lines.append("MASK MODE: click points on BEFORE · Enter close polygon · Backspace undo point · "
+            lines.append("MASK MODE (measurement errors, not counted): click points on BEFORE · Enter close polygon · Backspace undo point · "
                          "Delete remove polygon under cursor · m/Esc done")
         if self.nudge != [0, 0]:
             lines.append(f"nudge {self.nudge[1]:+d} / {self.nudge[0]:+d} px (applied after a short pause)")
@@ -724,6 +724,18 @@ class ZoomWindow:
         return [[((x / px - origin[1]) * scale, (y / px - origin[0]) * scale) for x, y in poly]
                 for poly in self.masks]
 
+    def _region_text(self, diff, origin) -> str:
+        """Percentages of this zoom region, leaving out masked measurement errors."""
+        state = self.viewer.state
+        masked = polygons_to_mask(self.masks, diff.shape, self.source.pixel_um, origin) if self.masks else None
+        if masked is None or not masked.any():
+            return f"This region: {region_summary(diff, state.threshold, state.signed)}"
+        if masked.all():
+            return "This region: completely masked as measurement error, not counted"
+        counted = np.where(masked, np.nan, diff)
+        return (f"This region, without masked measurement errors ({100 * masked.mean():.1f} % masked): "
+                f"{region_summary(counted, state.threshold, state.signed)}")
+
     def _locator(self, origin, shape) -> Locator:
         """Whole-sample overview (cached before image) with the zoom area marked."""
         meta, px = self.source.meta, self.source.pixel_um
@@ -758,7 +770,7 @@ class ZoomWindow:
         field = f"{format_length(w * px)} × {format_length(h * px)}"
         self.top.title(f"{self.sample}: zoom at x {cx:.0f} µm, y {cy:.0f} µm, field of view {field}")
         self.info.config(text=f"field of view {field} ({w} × {h} px)   centre x {cx:.0f} µm, y {cy:.0f} µm\n"
-                              f"This region: {region_summary(diff, state.threshold, state.signed)}")
+                              f"{self._region_text(diff, origin)}")
 
     def export(self) -> None:
         viewer, state = self.viewer, self.viewer.state
@@ -772,7 +784,7 @@ class ZoomWindow:
         whole = [f"Whole sample, {line[0].lower()}{line[1:]}" for line in state.region_lines(self.sample)]
         title = "\n".join([f"{self.sample} · {state.settings.type} · zoom at x {cx:.0f} µm, y {cy:.0f} µm, "
                            f"field of view {format_length(diff.shape[1] * px)}",
-                           f"This region: {region_summary(diff, state.threshold, state.signed)}"] + whole)
+                           self._region_text(diff, origin)] + whole)
         figure = render_export(images[0], images[1], np.asarray(images[2]), um_per_px=px / factor, title=title,
                                info=info, signed=state.signed, threshold=state.threshold,
                                cmap=prepare.load_colourmap(state.settings),
